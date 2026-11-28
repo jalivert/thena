@@ -16,7 +16,7 @@ thena spine> :show
 ▶ let t0 = refined : Nat -> Nat in
   t0
 thena spine> :choices
-31  fit-core   untried: fit-core
+31  fit-core (standard.thena.rules:291)   untried: fit-core (standard.thena.rules:295)
 thena spine> :undo
 ▶ let ? t0 : Nat -> Nat in
   t0
@@ -33,8 +33,8 @@ backtracking to 38: fit-core
 chose 42: fit-core
 already equal
 thena spine> :show
-  let ? a : Nat in
-  let refined = succ a : Nat in
+  let ? x : Nat in
+  let refined = succ x : Nat in
 ▶ let t1 = refined : Nat in
   t1
 thena spine> :abandon
@@ -49,9 +49,9 @@ backtracking to 51: fit-core
 chose 55: fit-core
 already equal
 thena spine> :show
-  let ? a : Nat in
-  let ? a1 : Nat in
-  let refined = mk a a1 : P in
+  let ? x : Nat in
+  let ? x1 : Nat in
+  let refined = mk x x1 : P in
 ▶ let t2 = refined : P in
   t2
 thena spine> :abandon
@@ -71,12 +71,12 @@ thena spine> fit-core core`Just`
 chose 86: fit-core
 backtracking to 86: fit-core
 chose 91: fit-core
-solved: a
+solved: A
 thena spine> :show
-  let a = Bool : Type₀ in
-  let refined = Just a : a -> Maybe a in
+  let A = Bool : Type₀ in
+  let refined = Just A : A -> Maybe A in
 ▶ let goal = refined : Bool -> Maybe Bool in
   goal
 thena spine> :choices
-91  fit-core   untried: fit-core
+91  fit-core (standard.thena.rules:291)   untried: fit-core (standard.thena.rules:295)
 thena spine> :quit

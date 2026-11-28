@@ -31,6 +31,7 @@ module Thena.Global.Env
   , knownIn
   , declaredNames
   , namespaceInhabited
+  , namespaceUnder
   , addConstant
   , addPrimitive
   , generalised
@@ -69,11 +70,20 @@ import Thena.Core.Level
   , substObligation
   )
 import Thena.Core.Context
-  (Context, Entry (..), entryType, entryVar, lamOver, piOver, substLevelsInEntry)
+  ( Context
+  , Entry (..)
+  , entryType
+  , entryVar
+  , lamOver
+  , piOver
+  , substLevelsInEntry
+  )
 import Thena.Core.Term
   ( Core (..)
   , Var
   , GlobalName (..)
+  , InScope
+  , globalUnder
   , rootName
   , inDeclarationOf
   , Ident (..)
@@ -85,6 +95,7 @@ import Thena.Core.Term
   , substLevelsIn
   , tokenName
   , tokenType
+  , wordsMadeFree
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -491,6 +502,29 @@ namespaceInhabited :: [String] -> GlobalEnv -> Bool
 namespaceInhabited ns e = any under (declaredNames e)
   where under g = ns `isPrefixOf` nameSteps g
 
+-- | __Which namespace a written path denotes where the writer stands__, or the
+-- candidates it is ambiguous between (MS12 phase 312).
+--
+-- **@open@'s own question, in one place.** 'Thena.Engine' asked it inline and
+-- the offer now has to ask it too — /which namespaces could be opened from
+-- here/ — and an offer that answered it a second way would differ from the act
+-- it is offering, which is the one failure a dropdown must not have.
+--
+-- **'Thena.Core.Term.globalUnder' is the walk and it is not written again
+-- here**: a path is a name whose last step is its word, @known@ is /something
+-- is declared under this prefix/, and the rungs, the @open@s and the
+-- two-answers refusal all come with it.
+namespaceUnder :: InScope -> GlobalEnv -> [String] -> Either [[String]] [String]
+namespaceUnder sc e ws = case globalUnder inhabited sc (asName ws) of
+  Right c -> Right (asPath c)
+  Left gs -> Left (map asPath gs)
+  where
+    inhabited c = namespaceInhabited (asPath c) e
+    asName vs = case reverse vs of
+      w : before -> GlobalName (reverse before) w
+      []         -> GlobalName [] ""
+    asPath c = nameSteps c ++ [nameWord c]
+
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
 
@@ -663,7 +697,7 @@ recursiveArgument dn np ty = case spine ty of
 -- cannot be a plain function of the record; that is the cost of \'Var\''s hidden
 -- constructor, paid here rather than by a second way to make a variable.
 eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
-eliminatorType d l n0 = (piOver tel goal, n1)
+eliminatorType d l n0 = (wordsMadeFree [] (piOver tel goal), n1)
   where (tel, goal, _, n1) = eliminatorParts Inductive d l n0
 
 -- | Which scheme 'eliminatorParts' is building (MS9 phase 178).
@@ -727,7 +761,8 @@ eliminatorName d = inDeclarationOf d "elim"
 -- by construction. @make-elim@ wrote @[]@ there, which is why a polymorphic
 -- datatype could not be eliminated through it.
 eliminatorWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
-eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+eliminatorWrapper d l n0 =
+  (wordsMadeFree [] (piOver tel goal), wordsMadeFree [] (lamOver tel node), n1)
   where (tel, goal, node, n1) = eliminatorParts Inductive d l n0
 
 -- | The name of the generated case-analysis definition: @caseNat@, @caseVec@
@@ -765,7 +800,8 @@ caseName d = inDeclarationOf d "case"
 -- @caseD@ and a user who writes @elimD@ with the hypotheses ignored have written
 -- the same term.
 caseWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
-caseWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+caseWrapper d l n0 =
+  (wordsMadeFree [] (piOver tel goal), wordsMadeFree [] (lamOver tel node), n1)
   where (tel, goal, node, n1) = eliminatorParts CaseAnalysis d l n0
 
 -- | The telescope, the conclusion under it, and the saturated node its own
@@ -824,6 +860,17 @@ eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node,
     -- **Each method's binder and the term the node applies, built together**,
     -- because for 'CaseAnalysis' the second mentions the first and both need
     -- the counter. They were one list until MS9 phase 178.
+    -- __Every word this telescope binds is free in it__ — his ruling of
+    -- 2026-11-20, /THERE IS ONE NAME/, part one. The words are minted blind
+    -- here and freed in one place, by the 'wordsMadeFree' every caller of this
+    -- walk passes the finished term through: @P@, @method@, @target@ and @ih@
+    -- are words the system supplies, and a datatype with a parameter called
+    -- @P@ or a method called @method@ used to print @P1@ and @method1@ and
+    -- store neither, so @:show Nat.case@ offered words that reached nothing.
+    -- **Numbering them here as well would be a second spelling of one rule**,
+    -- and this walk cannot see the whole scope anyway — a method's own
+    -- hypotheses are numbered against binders that are not in this telescope
+    -- (MS12 phase 329, which replaced the threading phase 328 added here).
     (methodParts, nEnd) = methods (inductiveConstructors d) n3
     methodEntries = map fst methodParts
     methodTerms   = map snd methodParts

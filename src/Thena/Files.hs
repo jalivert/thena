@@ -36,11 +36,11 @@ import qualified Paths_thena
 
 import Thena.Driver
   ( LoadError (..)
+  , Leniency (..)
   , Spread (..)
   , HeldGroup (..)
   , ruleBaseFileConsults
   , ruleBaseScopedConsults
-  , Item
   , Digest
   , digestOf
   , noteRead
@@ -51,6 +51,12 @@ import Thena.Driver
   , Session
   , loadProofSource
   , loadProofModules
+  , Walked (..)
+  , Stop (..)
+  , refuseSuspension
+  , importSuspended
+  , finishImport
+  , abandonItem
   , readModulePath
   , ruleBaseImports
   , rolledBack
@@ -64,7 +70,9 @@ import Thena.Driver
   , interfaceOf
   , preludeModule
   , LoadKind (..)
-  , parseSurfaceModule
+  , parseSurfaceModuleAt
+  , Placed
+  , placedItem
   , loadRuleBases
   , consultRuleBases
   , loadFinished
@@ -111,7 +119,7 @@ loadPrelude s = do
   contents <- try (readFile path)
   pure $ case contents of
     Left e  -> (s, [Unreadable path e])
-    Right c -> case loadProofSource s c of
+    Right c -> case loadProofSource Strict s c of
       -- **Silent on success, and the response says which it was.** A module
       -- gives one response, so unlike 'loadFile' there is no output to discard
       -- — there is a name for the thing that happened.
@@ -130,7 +138,7 @@ loadPrelude s = do
       -- cannot do it, 'loadProofSource' taking contents and no path.
       (s', ProofLoaded {}) ->
         ( noteRead path (digestOf c)
-            (moduleDeclared preludeModule (interfaceOf []) s s')
+            (moduleDeclared preludeModule (interfaceOf []) [] s s')
         , [] )
       (s', resp)           -> (noteRead path (digestOf c) s', [Unloadable path resp])
 
@@ -158,7 +166,7 @@ rulesPath = Paths_thena.getDataFileName "rules/standard.thena.rules"
 -- | Load the shipped rule base at startup, keeping only what went wrong.
 --
 -- 'loadPrelude'\'s bargain, in the same words: a broken or missing rule base is
--- reported and the session starts anyway, with an empty base. @prove@ then
+-- reported and the session starts anyway, with an empty base. @step@ then
 -- matches nothing, which says more than refusing to start would.
 loadStandardRules :: Session -> IO (Session, [Trouble])
 loadStandardRules s = do
@@ -247,11 +255,25 @@ imported
   -> IO (Either Trouble (Session, [Response]))
 imported s contents = go [] contents
   where
-    go done [] = pure $ case loadProofModules s done of
-      (s', Right rs)      -> Right (s', rs)
+    go done [] = pure $ case loadProofModules Strict s done of
+      (s', WalkedAll rs)      -> Right (s', rs)
+      -- **Cannot arise here** (MS12 phase 315): 'WalkedHalted' is
+      -- 'finishImport''s answer and this door never resumes one. Said rather
+      -- than left to a catch-all, because a silent fall-through is how a new
+      -- case gets lost.
+      (_, WalkedHalted bad)   ->
+        Left (Unloadable (case done of m : _ -> readModulePath m ; [] -> "") bad)
       -- A module nobody named: the path is the only thing that says which it
       -- was (MS11 phase 275).
-      (_, Left (m, bad))  -> Left (Unloadable (readModulePath m) bad)
+      (_, WalkedStopped m bad)  -> Left (Unloadable (readModulePath m) bad)
+      -- **A yield out of a module a RULE BASE imported is refused** (MS12 phase
+      -- 309). Nobody typed this module's name: the user asked for a base, and a
+      -- suspension here would hand them the wheel inside a file they did not
+      -- mention, with the base they asked for not installed. 'suspensionRefused'
+      -- puts the session back.
+      (s', WalkedSuspended _ _) ->
+        Left (Unloadable (case contents of { (p, _) : _ -> p ; [] -> "" })
+                         (snd (refuseSuspension s')))
     go done ((_, src) : rest) = case ruleBaseImports src of
       -- It did not parse. **Said by the read and not here**, so the position is
       -- in the message: this hands the file on untouched.
@@ -295,9 +317,9 @@ imported s contents = go [] contents
 -- in what they follow (the two acts against all five, a line typed at the prompt
 -- being allowed to @:load@). What they share is 'following', which is the part
 -- that could drift.
-loadFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
-loadFile s0 path = do
-  (s, out, trouble) <- script [] s0 path
+loadFile :: Leniency -> Session -> FilePath -> IO (Session, [Response], [Trouble])
+loadFile leniency s0 path = do
+  (s, out, trouble) <- script leniency [] s0 path
   pure (loadFinished s0 s, out, trouble)
 
 -- | __@:replay ‹proof-script›@ — run a script\'s lines as though the user had
@@ -319,8 +341,8 @@ loadFile s0 path = do
 -- **The script is not in 'Thena.Driver.filesRead'**, by the same ruling: the
 -- lines are in the record now, so the transcript does not stand on the script
 -- at all. The files those lines open are noted as they always were.
-replayFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
-replayFile = script []
+replayFile :: Leniency -> Session -> FilePath -> IO (Session, [Response], [Trouble])
+replayFile leniency = script leniency []
 
 -- | The loop both doors run: **one line at a time with the disc behind each
 -- line**, the session after, what its lines said, and what went wrong, kept
@@ -368,9 +390,9 @@ replayFile = script []
 -- the digest of what it said — see 'Thena.Driver.ReplayCycle' for why sameness
 -- is the contents and not the path.
 script
-  :: [(FilePath, Digest)] -> Session -> FilePath
+  :: Leniency -> [(FilePath, Digest)] -> Session -> FilePath
   -> IO (Session, [Response], [Trouble])
-script stack s0 path = do
+script leniency stack s0 path = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (s0, [], [Unreadable path e])
@@ -414,14 +436,14 @@ script stack s0 path = do
         -- trouble about a file the walk reached or as a response about the one
         -- the line named: either way the line did not do what it said, which is
         -- the whole of what 'stopped' means.
-        follow = case following s' resp of
+        follow = case following leniency s' resp of
           Nothing  -> go d s' (n + 1) (resp : acc) ls
           Just act -> spliced act
 
         -- **The ancestors, innermost last, so the list reads as the path the
         -- replay took** — 'imports' names a cycle the same way, and the script
         -- that closed the loop is named at both ends.
-        replay p = spliced (script ((path, d) : stack) s' p)
+        replay p = spliced (script leniency ((path, d) : stack) s' p)
 
         spliced act = do
           (s'', rs, ts) <- act
@@ -448,12 +470,12 @@ script stack s0 path = do
 -- anything elaborated. **Nothing is installed if any of it will not read**, the
 -- same all-or-nothing 'loadRuleFiles' promises, and 'Thena.Driver.loadProofModules'
 -- carries that promise across the whole closure.
-loadProofFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
-loadProofFile s path = do
+loadProofFile :: Leniency -> Session -> FilePath -> IO (Session, [Response], [Trouble])
+loadProofFile leniency s path = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (s, [], [Unreadable path e])
-    Right c -> case parseSurfaceModule c of
+    Right c -> case parseSurfaceModuleAt c of
       -- **The file the user named answers with a response, as it always has.**
       -- The line they typed is what failed and the path is in front of them; an
       -- imported file is the case that needs its path said, and 'gather' says it.
@@ -462,14 +484,24 @@ loadProofFile s path = do
         gathered <- assemble s [] [] (moduleOfFile path) path (digestOf c) nm items
         pure $ case gathered of
           Left t   -> (s, [], [t])
-          Right ms -> case loadProofModules s ms of
-            (s', Right rs)       -> (s', rs, [])
+          Right ms -> case loadProofModules leniency s ms of
+            (s', WalkedAll rs)       -> (s', rs, [])
+            -- **Cannot arise**: this door starts a load, it does not resume one.
+            (s', WalkedHalted bad)   -> (s', [bad], [])
+            -- **A yield suspends the load and the session keeps it** (MS12
+            -- phase 309). It is a response and not trouble whichever
+            -- file it came out of: the user is being handed the wheel, which is
+            -- a thing that happened rather than a thing that went wrong.
+            -- **@thena-check@ is what refuses it**, because a batch checker has
+            -- nobody to hand control to — the decision belongs to the caller
+            -- with or without a prompt, not to the load.
+            (s', WalkedSuspended done resp) -> (s', done ++ [resp], [])
             -- **The file the user named answers with a response and an imported
             -- one with trouble** (MS11 phase 275) — the same split 'gather' makes
             -- for a file that will not read, now made for one that will not
             -- elaborate. Without it a failure inside an imported module arrives
             -- as a bare refusal about a file nobody mentioned.
-            (s', Left (m, bad))
+            (s', WalkedStopped m bad)
               | readModulePath m == path -> (s', [bad], [])
               | otherwise -> (s', [], [Unloadable (readModulePath m) bad])
 
@@ -486,7 +518,7 @@ gather s stack done m = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (Left (Unreadable path e))
-    Right c -> case parseSurfaceModule c of
+    Right c -> case parseSurfaceModuleAt c of
       Left e -> pure (Left (Unloadable path (Failed e)))
       -- **THE HEADER IS CHECKED HERE AND NOWHERE ELSE** — his ruling of
       -- 2026-11-05, @~r58qh@: the match is asked only when the file is reached
@@ -511,8 +543,8 @@ gather s stack done m = do
 -- what has been gathered so far.
 assemble
   :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
-  -> Digest -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
-assemble s stack done as path d nm items = do
+  -> Digest -> ModuleName -> [Placed] -> IO (Either Trouble [ReadModule])
+assemble s stack done as path d nm placed = do
   walked <- imports s inner done (moduleImports items)
   case walked of
     Left t      -> pure (Left t)
@@ -539,8 +571,11 @@ assemble s stack done as path d nm items = do
                        (concatMap stated
                           (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
                                   | sp <- maybe [] id srcs ]))
-          pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs items]) walked')
+          pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs placed]) walked')
   where
+    -- Every question asked of the items here is about what they say; where
+    -- each was written travels on into 'ReadModule' untouched (MS12 phase 334).
+    items = map placedItem placed
     inner = maybe stack (: stack) as
     -- It did not parse. **Said by the read and not here**, so the position is
     -- in the message: 'Thena.Driver.consultRuleBases' refuses it when the pool
@@ -682,11 +717,18 @@ beneath stack ((path, src) : rest) = do
 -- Written once (2026-09-13) because there are now two callers — the interactive
 -- @loop@ and @transcriptIO@ — and three near-identical cases in each would be
 -- six places for a fourth kind of load to be forgotten in.
-following :: Session -> Response -> Maybe (IO (Session, [Response], [Trouble]))
-following s resp = case resp of
-  LoadRequested path   -> Just (loadFile s path)
+-- **AND IT CARRIES THE ACT'S LENIENCY** (MS12 phase 315, @~mgqwb@). Whether a
+-- module that does not elaborate whole loads as far as it can belongs to the
+-- act that was typed and not to any file in it — his ruling of 2026-11-11 — so
+-- it is this door's argument and not a field of the session. **The interactive
+-- prompt passes 'Lenient' and @thena-check@ passes 'Strict'**, which is the
+-- same split the two already make about a @yield@: a batch run has nobody to
+-- hand the wheel to, and nobody to fix a proof either.
+following :: Leniency -> Session -> Response -> Maybe (IO (Session, [Response], [Trouble]))
+following leniency s resp = case resp of
+  LoadRequested path   -> Just (loadFile leniency s path)
   -- A proof module: the driver elaborates it, this only reads the file.
-  ProofRequested path  -> Just (loadProofFile s path)
+  ProofRequested path  -> Just (loadProofFile leniency s path)
   -- Several paths rather than one — a load replaces the whole ordered list.
   RulesRequested paths -> Just (loadRuleFiles s paths)
   -- The same read, a different install: a consult pushes onto the pool where a
@@ -694,12 +736,38 @@ following s resp = case resp of
   ConsultRequested paths _ -> Just (consultRuleFiles s paths)
   -- A module named rather than a path: the name is resolved here, where the
   -- disk is (MS11 phase 284).
-  ImportRequested m _  -> Just (importModule s m)
+  ImportRequested m _  -> Just (importModule leniency s m)
   -- **A script, submitted as though typed** (MS11 phase 302). The empty stack
   -- is the point of entry: a line typed at the prompt is nested inside nothing,
   -- so no replay it starts can close a loop that was already open.
-  ReplayRequested path -> Just (replayFile s path)
+  ReplayRequested path -> Just (replayFile leniency s path)
+  -- **A line whose run finished a suspended import** (MS12 phase 309). The
+  -- user typed @yield@, the module's own program carried on and
+  -- ran out, and /that line/ has no idea it just finished a load — so the
+  -- completion is noticed here, after the line, by the one door that can answer
+  -- with several responses. Finishing one module may put the next of the closure
+  -- in, and the next, and any of them may yield again.
+  --
+  -- **It needs no disc, and comes through this door anyway**: this is the door
+  -- that carries a list of responses, and a completion lands a whole closure.
+  Ran _ _ Completed | Just _ <- importSuspended s -> Just (pure (finished s))
+  -- **@:abandon@ on a standing import** (MS12 phase 317, his ruling of
+  -- 2026-11-14). It gives up the declaration that was being elaborated and the
+  -- module carries on, so it answers what a finished import answers — which
+  -- is why it comes through this door and not out of the command itself.
+  AbandonRequested _
+    | Just imp <- importSuspended s -> Just (pure (walked (abandonItem s imp)))
   _                    -> Nothing
+  where
+    finished sess = walked (finishImport sess)
+    walked w = case w of
+      (s', WalkedAll rs)           -> (s', rs, [])
+      (s', WalkedSuspended done r) -> (s', done ++ [r], [])
+      -- **The rest of the resumed module refused** (MS12 phase 315). It is a
+      -- response and not trouble: the file is the one the user has been
+      -- standing in, so there is no path to say that they do not already know.
+      (s', WalkedHalted r)         -> (s', [r], [])
+      (s', WalkedStopped m r)      -> (s', [], [Unloadable (readModulePath m) r])
 
 -- | __@import ‹module›@ typed at the prompt__ (MS11 phase 284, his ruling of
 -- 2026-11-03 that both acts are writable there).
@@ -718,14 +786,17 @@ following s resp = case resp of
 -- **A failure in the module the user named answers with a response; one inside
 -- something it pulled in answers with trouble naming that file** — the same
 -- split 'loadProofFile' makes, and for its reason.
-importModule :: Session -> ModuleName -> IO (Session, [Response], [Trouble])
-importModule s m = do
+importModule :: Leniency -> Session -> ModuleName -> IO (Session, [Response], [Trouble])
+importModule leniency s m = do
   walked <- imports s [] [] [m]
   pure $ case walked of
     Left t   -> (s, [], [t])
     Right [] -> (s, [ModuleAlreadyIn m], [])
-    Right ms -> case loadProofModules s ms of
-      (s', Right rs) -> (s', rs, [])
-      (s', Left (bad, resp))
+    Right ms -> case loadProofModules leniency s ms of
+      (s', WalkedAll rs) -> (s', rs, [])
+      (s', WalkedSuspended done resp) -> (s', done ++ [resp], [])
+      -- **Cannot arise**: this door starts a load, it does not resume one.
+      (s', WalkedHalted resp) -> (s', [resp], [])
+      (s', WalkedStopped bad resp)
         | readModuleName bad == Just m -> (s', [resp], [])
         | otherwise -> (s', [], [Unloadable (readModulePath bad) resp])

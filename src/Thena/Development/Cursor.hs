@@ -37,6 +37,9 @@ module Thena.Development.Cursor
   , gotoNamed
   , toRoot
   , identsIn
+  , goalsIn
+  , goalsWithin
+  , nextGoal
   , freshIdent
   , into
   , crossType
@@ -47,9 +50,11 @@ module Thena.Development.Cursor
     -- * Reading the position (§4.5)
   , context
   , expectedType
+  , atTrailingHole
 
     -- * Changing the development
   , insertAbove
+  , insertAt
   , replaceFocus
   , replaceComponent
   , dropFocus
@@ -65,10 +70,10 @@ module Thena.Development.Cursor
 
 import Data.Foldable (toList)
 import Data.List ((\\))
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 
 import Thena.Core.Level (Level, LevelVar, substLevel)
-import Thena.Core.Context (Context, Entry (..), substLevelsInEntry)
+import Thena.Core.Context (Context, Entry (..), freshIdent, substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -371,12 +376,24 @@ toRoot = enter . rebuild
 gotoNamed :: Ident -> Cursor -> Either MoveError Cursor
 gotoNamed i = searchFrom (\_ j -> j == i)
 
--- | Depth first from the root, over holes and guesses only.
+-- | Depth first from the root, over holes, guesses and the definitions they
+-- become.
 --
 -- It **descends into guess bodies**, so a hole under an @attack@ is reachable;
 -- @along@ alone never leaves the outer chain. Three lines, because the zipper
 -- is persistent: @inside@ searches a guess\'s subtree and, if it finds nothing,
 -- @next@ carries on from the /unchanged/ cursor.
+--
+-- **A 'Define' is found too, since MS12 phase 320**, and that is what makes a
+-- position unification has already solved reachable: @solve@ promotes @? x : S@
+-- to @x = v : S@ in place and keeps the identifier, so a @goto@ that stopped at
+-- holes said /that names no hole or guess/ about a position still standing in
+-- the development. Elaboration needs to reach one — a written argument whose
+-- hole the goal forced is checked against it ('elaborate-written' in the
+-- shipped base) — and for a person at the prompt it is his ruling of
+-- 2026-09-01 one move down: what is printed is reachable, and being unable to
+-- look at a solved hole is a prevention with nothing behind it. An 'Assume' is
+-- still not found: it binds a hypothesis, not a position elaboration claimed.
 --
 -- It rebuilds from the root first, so the resulting path is the path from the
 -- root and @back@ walks it normally.
@@ -386,9 +403,10 @@ searchFrom p cur = maybe (Left NoSuchHole) Right (search (enter (rebuild cur)))
     search c = here c `orElse` inside c `orElse` next c
 
     here c = case focus c of
-      OnComponent (Claim y i _)   | p y i -> Just c
-      OnComponent (Guess y i _ _) | p y i -> Just c
-      _                                   -> Nothing
+      OnComponent (Claim y i _)    | p y i -> Just c
+      OnComponent (Guess y i _ _)  | p y i -> Just c
+      OnComponent (Define y i _ _) | p y i -> Just c
+      _                                    -> Nothing
 
     inside c = case into c of
       Right c' -> search c'
@@ -426,26 +444,144 @@ identsIn = idents . rebuild
       Guess  _ i _ _ -> i
       Quantify _ i _ -> i
 
--- | An identifier not already taken: the hint, or the hint with the first
--- number that frees it.
+-- | Every hole and guess in the whole development, outermost first, as the
+-- identifier it is printed by and the variable that reaches it.
 --
--- **Freshening happens when a component is built, not when it is printed —
--- DECIDED by the user 2026-08-25.** Before this, two components could carry the
--- same 'Ident' and the printer told them apart for the screen only, so the name
--- you saw was not the name that was stored and @goto ‹name›@ could not find it.
--- Now what is printed is what is there.
+-- **The pair is the point.** 'goto' takes the 'Var' and 'gotoNamed' the 'Ident',
+-- so anything holding only the printed name cannot aim the exact move; this
+-- answers both halves at once. It is 'identsIn' narrowed to the components that
+-- are goals and widened to say what each one binds.
 --
--- "Thena.Repl"\'s own @freshen@ stays: core terms bind with de Bruijn indices,
--- so opening a binder for display still has to avoid shadowing. That is a
--- different problem in a different fragment.
-freshIdent :: [Ident] -> Ident -> Ident
-freshIdent taken i@(Ident hint)
-  | free i    = i
-  | otherwise = numbered (1 :: Int)
+-- **Goals and guesses only — his ruling of 2026-11-19**, /"goals and guesses
+-- only for now"/. 'Assume' and 'Quantify' bind a hypothesis rather than a
+-- position elaboration claimed, and a 'Define' is a position already solved. So
+-- this and 'gotoNamed' disagree in exactly one place: 'searchFrom' has found a
+-- 'Define' since MS12 phase 320 and this does not list one.
+goalsIn :: Cursor -> [(Ident, Var)]
+goalsIn = goalsWithin . rebuild
+
+-- | The same walk, over a 'Partial' rather than a focused development.
+--
+-- **It is separate because 'nextGoal' asks it of a guess's body**, to decide
+-- whether that guess has anything open inside it. One walk, so the goal list a
+-- pane shows and the goal @next@ picks cannot come to disagree about what a
+-- goal is.
+goalsWithin :: Partial -> [(Ident, Var)]
+goalsWithin = goals
   where
-    free j = j `notElem` taken
-    numbered k =
-      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
+    goals q = case q of
+      Under   c rest -> at c ++ within c ++ goals rest
+      Pending _ rest -> goals rest
+      Trailing _     -> []
+
+    -- **A guess's body holds goals too**, for 'identsIn'\'s reason: 'gotoNamed'
+    -- searches the whole development, so a hole under an @attack@ has to be
+    -- listed here or it is reachable by a name nothing offered.
+    within c = case c of
+      Guess _ _ g _ -> goals g
+      _             -> []
+
+    at c = case c of
+      Claim  x i _   -> [(i, x)]
+      Guess  x i _ _ -> [(i, x)]
+      _              -> []
+
+-- | __The goal to work on next__ (MS12, @~g3qnw@): __the first unfinished goal
+-- in the innermost piece of work that still has one__.
+--
+-- A /piece of work/ is a guess body — what an @attack@ opened — and the
+-- outermost piece of work is the development itself. So the search is innermost
+-- body first, and it widens only when the body it is in has nothing left.
+--
+-- **The machine keeps no list of open goals and this is why** — his ruling of
+-- 2026-11-23, written up in @.jalivert\/discussion\/focusing-the-next-goal.md@.
+-- The development already says what is unfinished and in what order, so there is
+-- no second structure to keep in step with it and nothing that can fall out of
+-- date. Coq and Lean keep a goal list because their hole stores are unordered
+-- maps; an ordered chain does not have that problem.
+--
+-- **A goal counts only when no goal is open inside it, and that filter is part
+-- of the definition rather than a refinement of it.** 'goalsIn' puts the root
+-- guess first and the root is a guess from @attack@ until @qed@, so /the first
+-- goal in the list/ would name the root for ever and @next@ would never move.
+-- 'Thena.Engine' refuses @solve@ on a guess whose body is not pure, so a guess
+-- with work inside it is not a goal anybody can act on — only its innermost
+-- descendants are. A 'Claim' always counts: it has no body.
+--
+-- **Innermost first is the locality he asked for**: goals inside the part you
+-- are working on /"have much to do with our current work and intention"/, so
+-- @next@ may not leave for an unrelated part of the proof while that part still
+-- has work. Document order from the root would: an open hole claimed earlier by
+-- a sibling application sits before the body you are standing in, and
+-- @step-in-scope.golden@\'s @goto a@ is that case by hand.
+--
+-- **Within a level the answer does not depend on where in it you stand**, which
+-- is what makes @next@ predictable for a rule: it is a function of the
+-- development and the body you are in, not of where a tactic happened to leave
+-- the focus. So @next@ on a goal that is already countable stays put, and a
+-- strategy can write @next@ before every step without skipping work.
+nextGoal :: Cursor -> Either MoveError Cursor
+nextGoal cur = maybe (Left NoGoalLeft) Right (firstOf (map search levels))
+  where
+    root = enter (rebuild cur)
+
+    -- The bodies the cursor stands inside, innermost first, then the
+    -- development itself. A level is named by the guess that opened it, and
+    -- 'goto' then 'into' is how it is re-entered — both existing moves, so no
+    -- second way of walking the chain is introduced here.
+    levels = [ body x | x <- reverse (enclosing (prefix cur)) ] ++ [Just root]
+
+    enclosing p = [ x | IntoGuess x _ _ _ <- toList p ]
+
+    body x = case goto x root of
+      Right c -> either (const Nothing) Just (into c)
+      Left _  -> Nothing
+
+    search Nothing  = Nothing
+    search (Just c) = leafFrom c
+
+    firstOf xs = case [ a | Just a <- xs ] of
+      a : _ -> Just a
+      []    -> Nothing
+
+-- | The first countable goal at or after a position, depth first: the focus,
+-- then inside it, then on along the chain.
+--
+-- The same shape as 'searchFrom' — @here@, @inside@, @next@ — and deliberately
+-- so, except that it starts where it is put rather than at the root and tests
+-- for a goal with nothing open inside it.
+leafFrom :: Cursor -> Maybe Cursor
+leafFrom = go
+  where
+    go c = here c `orElse` inside c `orElse` onward c
+
+    here c = case focus c of
+      OnComponent k | countable k -> Just c
+      _                           -> Nothing
+
+    inside c = either (const Nothing) go (into c)
+    onward c = either (const Nothing) go (along c)
+
+    orElse (Just a) _ = Just a
+    orElse Nothing  b = b
+
+-- | Is this component a goal with nothing open inside it — the thing @next@
+-- lands on? See 'nextGoal' for why the second half is not optional.
+countable :: Component -> Bool
+countable c = case c of
+  Claim _ _ _     -> True
+  Guess _ _ g _   -> null (goalsWithin g)
+  _               -> False
+
+-- 'freshIdent' is re-exported from "Thena.Core.Context" and not defined here.
+-- **One numbering rule for a word the system supplies**, his ruling of
+-- 2026-11-20: it is asked of a development\'s identifiers through this module
+-- and of a context\'s words through @writableIn@, and the two disagreeing about
+-- what a free word is would put a name on screen that nothing answers to.
+--
+-- "Thena.Syntax.Print"\'s own @freshen@ stays for now: core terms bind with de
+-- Bruijn indices, so opening a binder for display still has to avoid shadowing.
+-- @~n4jhj@\'s second phase is what deletes it.
 
 -- | Enter a guess's body, which stays inside the partial fragment (§4.2).
 --
@@ -628,6 +764,28 @@ expectedType cur = case cur of
     TrailingTerm                    -> innermostGuess p
   InCore {} -> Nothing
 
+-- | Is the focus table 2.8's @?x : S . x@ — a hole whose chain ends in its own
+-- variable, and nothing else after it?
+--
+-- **This is the introduction tactics' shape test, and it is the specification**
+-- (OLEG table 2.8: they /"only replace constructions of the shape @?x : S . x@"/).
+-- It lives here because it is a question about the position, not about the
+-- component: the same hole one @along@ further up its chain is a different
+-- answer, and a binder inserted above a hole that is /not/ trailing would put
+-- everything below it under that binder and change what the construction
+-- proves.
+--
+-- **Being inside a guess is part of the shape**, which is why the enclosing
+-- 'IntoGuess' is asked for: the thesis writes the tactics over
+-- @?x ≐ (?x' : S . x')@, so what they rewrite is a guess's /body/. The root of
+-- a development has the trailing shape too, and a binder put there would change
+-- what the development proves — the thing @attack@ exists to stop.
+atTrailingHole :: Cursor -> Bool
+atTrailingHole cur = case cur of
+  InPartial p (Claim v _ _) (Trailing (Free v'))
+    | v == v' -> isJust (innermostGuess p)
+  _           -> False
+
 componentType :: Component -> Core
 componentType c = case c of
   Assume _ _   s -> s
@@ -664,6 +822,27 @@ insertAbove c cur = case cur of
   InPartial    p f rest    -> InPartial    (p :> Along c) f rest
   AtConstraint p k rest    -> AtConstraint (p :> Along c) k rest
   InCore       p x ts t    -> InCore       (p :> Along c) x ts t
+
+-- | Insert a component at a numbered position, as 'postConstraint' does for a
+-- constraint (MS12 phase 320) — @0@ is the root and the path's own length is
+-- immediately above the focus, which is what 'insertAbove' does.
+--
+-- **What wants it is a scope repair**: "Thena.Core.Unify" strengthens a hole it
+-- cannot otherwise solve by claiming a copy of a later hole /before/ it, which
+-- is §6.4's dependency order being satisfied by adding information rather than
+-- by moving any. The numbering is 'chain'\'s, so the caller passes a position it
+-- read off there.
+insertAt :: Int -> Component -> Cursor -> Cursor
+insertAt n c cur = case cur of
+  InPartial    p f rest -> InPartial    (place p) f rest
+  AtConstraint p k rest -> AtConstraint (place p) k rest
+  InCore       p x ts t -> InCore       (place p) x ts t
+  where
+    place p = foldl (:>) Here (spliceAt (max 0 (min n (length (toList p)))) (toList p))
+
+    spliceAt _ []       = [Along c]
+    spliceAt 0 ss       = Along c : ss
+    spliceAt m (s : ss) = s : spliceAt (m - 1) ss
 
 -- | Replace the focus — the focused form and everything below it — with
 -- another partial construction, and land on its head (§4.0 F6).
@@ -959,13 +1138,13 @@ postConstraint n k cur = case cur of
 
     depth = length . toList
 
-    splice p d = foldl (:>) Here (insertAt (clamp d) (toList p))
+    splice p d = foldl (:>) Here (pastAt (clamp d) (toList p))
 
     clamp d = max 0 (min n d)
 
-    insertAt _ []       = [Past k]
-    insertAt 0 ss       = Past k : ss
-    insertAt m (s : ss) = s : insertAt (m - 1) ss
+    pastAt _ []       = [Past k]
+    pastAt 0 ss       = Past k : ss
+    pastAt m (s : ss) = s : pastAt (m - 1) ss
 
     spliceUnder m q
       | m <= 0 = Pending k q

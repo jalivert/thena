@@ -15,10 +15,11 @@ module Thena.ContextTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Literal (..), rootScope)
-import Thena.Declared (named)
+import Thena.Core.Term (Core (..), Literal (..))
+import Thena.Declared (named, opensIn)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , command
@@ -142,8 +143,8 @@ twoKinds =
       s <- loaded twoContexts
       let env = globals (machineOf s)
       map (\n -> isDeclared (named n) env)
-        [ "Ctx.bind-in.bind-in", "Ctx.bind-in.bind-here"
-        , "Ctx.bind-in.bind-there-bind", "Dtx.bind-in.bind-here"
+        [ "TwoCtx.Ctx.bind-in.bind-in", "TwoCtx.Ctx.bind-in.bind-here"
+        , "TwoCtx.Ctx.bind-in.bind-there-bind", "TwoCtx.Dtx.bind-in.bind-here"
         , "bind-in", "bind-here" ]
         @?= [True, True, True, True, False, False]
 
@@ -168,14 +169,12 @@ twoKinds =
   , testCase "a term lookup steps over a type binding with nothing to prove" $ do
       _ <- loaded (fsubHeader ++
         [ "pastType : bindTm-in`x : \8868 \8712 \183 , x : \8868 , X <: \8868`"
-        , "pastType = bindTm-there-bindTy (bindTm empty \"x\" top) \"x\" top \"X\" top"
-        , "             (bindTm-here empty \"x\" top)" ])
+        , "pastType = bindTm-there-bindTy bindTm-here" ])
       pure ()
   , testCase "and a type lookup over a term binding the same way" $ do
       _ <- loaded (fsubHeader ++
         [ "pastTerm : bindTy-in`X <: \8868 \8712 \183 , X <: \8868 , x : \8868`"
-        , "pastTerm = bindTy-there-bindTm (bindTy empty \"X\" top) \"X\" top \"x\" top"
-        , "             (bindTy-here empty \"X\" top)" ])
+        , "pastTerm = bindTy-there-bindTm bindTy-here" ])
       pure ()
     -- **Shadowing within one namespace is unchanged**: stepping a term lookup
     -- over another term binding still needs the inequality, so a binding hidden
@@ -183,8 +182,7 @@ twoKinds =
   , testCase "stepping over a binding of its own kind still needs the inequality" $ do
       r <- load (fsubHeader ++
         [ "shadowed : bindTm-in`x : \8868 \8712 \183 , x : \8868 , x : \8868`"
-        , "shadowed = bindTm-there-bindTm (bindTm empty \"x\" top) \"x\" top \"x\" top"
-        , "             (bindTm-here empty \"x\" top)" ])
+        , "shadowed = bindTm-there-bindTm bindTm-here" ])
       either (const (pure ())) (const (assertFailure "it was reached with no ne")) r
   ]
 
@@ -231,10 +229,20 @@ substituted =
         , "            --------------------"
         , "            \915 \8866 S <: S'"
         , "open sub" ])
+      -- **The metavariables are implicit and undetermined** (MS12 phase 320),
+      -- so @:infer@ quantifies them — **and since phase 345 under the words
+      -- the judgment was written with**, @\915@, @X@, @T@, @S@ and @S'@,
+      -- rather than the @a@, @a1@, @a2@ the caller used to mint. The premise
+      -- is still an argument you supply, so it is still an arrow.
+      --
+      -- **@X@ comes back as @X1@ because @X@ is taken**: the header declares a
+      -- type variable of that word, so the hole's word is freshened against
+      -- the development exactly as every other claimed word is. That is the
+      -- case to watch — the declared word is a /request/, not a guarantee.
       said s ":infer S-narrow" @?=
-        [ "S-narrow : \8704 (\915 : Ctx) (X : String) (T : Ty) (S : Ty)"
-            ++ " (S' : Ty)"
-            ++ " -> sub`${\915} [ ${X} -> ${T} ] \8866 ${S} <: ${S'}`"
+        [ "S-narrow : \8704 {\915 : Ctx} {X1 : String} {T : Ty} {S : Ty}"
+            ++ " {S' : Ty}"
+            ++ " -> sub`${\915} [ ${X1} -> ${T} ] \8866 ${S} <: ${S'}`"
             ++ " -> sub`${\915} \8866 ${S} <: ${S'}`" ]
     -- **A context whose entries can hold no name gets nothing**, which is
     -- STLC's: its @Ty@ has no variable production, so there is nothing in a Γ
@@ -265,7 +273,7 @@ xNotY =
 load :: [String] -> IO (Either String Session)
 load body = do
   (s0, _) <- startingSession
-  pure $ case loadProofSource s0 (unlines body) of
+  pure $ case loadProofSource Strict s0 (unlines body) of
     (s1, ProofLoaded {}) -> Right s1
     (s1, other) -> Left (last (renderResponse s1 other))
 
@@ -288,10 +296,10 @@ declared =
       s <- loaded header
       said s ":show extend-in" @?=
         [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
-        , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty)"
+        , "  { extend-here : ∀ {Γ : Ctx} {x : String} {T : Ty}"
             ++ " -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
-        , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty)"
-            ++ " (x' : String) (T' : Ty)"
+        , "  ; extend-there-extend : ∀ {Γ : Ctx} {x : String} {T : Ty}"
+            ++ " {x' : String} {T' : Ty}"
             ++ " -> (Eq {0} String x x' -> Empty {0})"
             ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
@@ -302,7 +310,7 @@ notation =
   [ testCase "the notation is read and built as the relation applied" $ do
       s <- loaded header
       let gs = grammars (machineOf s)
-      case parse (earleyRules gs) (Earley.StartAt "Ctx.extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
+      case parse (earleyRules gs) (Earley.StartAt "Ctx.Ctx.extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
           (apps "Ctx.extend-in.extend-in"
@@ -311,7 +319,9 @@ notation =
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
-      printRegion (grammars m) rootScope (renderCore (rendering [] 0) [])
+      -- **With the fixture's own module open** (MS12 phase 313): a module's
+      -- languages live under its namespace, and this is where a reader stands.
+      printRegion (grammars m) (opensIn (globals m)) (renderCore (rendering [] 0) [])
           (apps "Ctx.extend-in.extend-in"
             [ str "x", con "Ty.base"
             , apps "Ctx.extend" [con "Ctx.empty", str "x", con "Ty.base"] ])
@@ -331,39 +341,50 @@ notation =
       -- shortest ending that resolves where the reader stands.
       said s ":show D.push-in" !! 0
         @?= "data D.push-in.push-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D.push-in")
+      -- **THE PARSER IS KEYED BY THE GRAMMAR'S OWN NAME** (MS12 phase 313), so
+      -- the start symbol carries the module's namespace even where the printer
+      -- above writes the short ending a reader sees.
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "Last.D.push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()
   ]
   where
     str = Primitive . LString
-    con n = Global (named n) []
+    -- **Under the fixture's module namespace** (MS12 phase 313): @header@ is
+    -- @module Ctx where@, so @Ctx.extend@ is @Ctx.Ctx.extend@.
+    con n = Global (named ("Ctx." ++ n)) []
     apps f = foldl App (con f)
 
+-- | **A proof names no metavariable** (MS12 phase 320, `~td9j6`): a generated
+-- lookup relation quantifies its @Γ@, @x@ and @T@ implicitly, so a proof is
+-- @extend-here@ and a step past another binding is @extend-there-extend ne i@.
+-- The two refusals below are refusals of the proof and not of its arity — with
+-- the metavariables still written they would be refused for the wrong reason,
+-- which is the trap this family is here to avoid.
 proofs :: [TestTree]
 proofs =
   [ testCase "a lookup at the top is extend-here" $ do
       _ <- loaded (header ++
         [ "found : Ctx.extend-in`x : \953 \8712 \183, x : \953`"
-        , "found = extend-here empty \"x\" base" ])
+        , "found = extend-here" ])
       pure ()
   , testCase "one under a later binding of another name is extend-there-extend, with ne proved" $ do
       _ <- loaded (header ++ xNotY ++
         [ "under : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "under = extend-there-extend (extend empty \"x\" base) \"x\" base \"y\" base xNotY (extend-here empty \"x\" base)" ])
+        , "under = extend-there-extend xNotY extend-here" ])
       pure ()
   , testCase "extend-here does not reach under a later binding" $ do
       r <- load (header ++
         [ "wrong : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "wrong = extend-here (extend empty \"x\" base) \"x\" base" ])
+        , "wrong = extend-here" ])
       either (const (pure ())) (const (assertFailure "extend-here was accepted under y")) r
     -- The shadowing: to reach the earlier x past a later x, ne must prove
     -- x ≠ x, and xNotY is a proof of something else.
   , testCase "and extend-there-extend cannot skip a binding of the same name" $ do
       r <- load (header ++ xNotY ++
         [ "shadowed : Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "shadowed = extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) xNotY (extend-here empty \"x\" base)" ])
+        , "shadowed = extend-there-extend xNotY extend-here" ])
       either (const (pure ())) (const (assertFailure "a shadowed binding was reached")) r
     -- And what it would take is exactly a refutation of refl: reaching the
     -- earlier x needs Eq String "x" "x" -> Empty, which applied to refl is
@@ -371,7 +392,7 @@ proofs =
   , testCase "what it would take is a proof that x is not x" $ do
       _ <- loaded (header ++
         [ "needs : (Eq String \"x\" \"x\" -> Empty) -> Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "needs = \\ ne -> extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) ne (extend-here empty \"x\" base)"
+        , "needs = \\ ne -> extend-there-extend ne extend-here"
         , ""
         , "absurdly : (Eq String \"x\" \"x\" -> Empty) -> Empty"
         , "absurdly = \\ ne -> ne (refl String \"x\")" ])
@@ -382,16 +403,16 @@ refused :: [TestTree]
 refused =
   [ refusal "an extension with no name"
       ["context C, G where", "  e -> \183", "  f -> G , T"]
-      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has none"
+      "refused: in the context C: its extension Ctx.C.f needs exactly one name to look up, and it has none"
   , refusal "an extension with two"
       ["y : Token String", "y = /[a-z]+/", "", "context C, G where", "  e -> \183", "  f -> G , x = y : T"]
-      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has x, y"
+      "refused: in the context C: its extension Ctx.C.f needs exactly one name to look up, and it has x, y"
     -- **The PLACED name, since MS10 phase 263** (`~gkbgs`): the family is in the
     -- context's namespace, so a root-level @f-here@ no longer collides with it
     -- and the name that does is the one the relation would declare.
   , refusal "a lookup name already declared"
       ["C.f-in.f-here : Ty", "C.f-in.f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
-      "refused: C's lookup C.f-in.f-here is already declared"
+      "refused: C's lookup Ctx.C.f-in.f-here is already declared"
     -- **A production with TWO of its own slots is still refused** (MS8 phase
     -- 156): a lookup relation steps over one binding, and there is nothing for
     -- it to read in a form that joins two contexts. More than one *extension* is

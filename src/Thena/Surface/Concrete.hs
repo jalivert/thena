@@ -33,6 +33,7 @@ module Thena.Surface.Concrete
   , Analysis (..)
   , Plicity (..)
   , blocksIn
+  , plicitiesIn
   , surfaceName
   ) where
 
@@ -47,7 +48,12 @@ import Thena.Core.Term (GlobalName (..), Literal (..))
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
 import Thena.Instral.Concrete (RawInstr (..), Reach (..), Selection (..))
-import Thena.Syntax.Lexer (BlockKind)
+-- **And 'Pos' is a block's declarations' too since MS12 phase 336** (@~6g27s@,
+-- his ruling of 2026-11-22 that a composite item is walked into): the loader
+-- walks into a @namespace@, @import … where@ or @consult … where@ block one
+-- declaration at a time, so a declaration inside one is something a pane's row
+-- can point at and its line has to reach 'Thena.Driver.regroup'.
+import Thena.Syntax.Lexer (BlockKind, Pos)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
@@ -321,7 +327,24 @@ data SurfaceModule = SurfaceModule
   , surfaceModuleExports :: Selection
     -- ^ what the header says about its interface, as written (MS11 phase 285
     -- for @exporting@, 290 for @hiding@, @~jmw4k@).
-  , surfaceModuleDecls :: [SurfaceDecl]
+  , surfaceModuleDecls :: [(Maybe Pos, SurfaceDecl)]
+    -- ^ the declarations, **each with the position it was written at** (MS12
+    -- phase 334, @~hcr2d@): his ask of 2026-11-20 was a line and a column on a
+    -- declaration that did not go in, and the lexer is the only thing that ever
+    -- knew one.
+    --
+    -- **The position is the delimiter's, which under layout /is/ the
+    -- declaration's first token.** The pass that inserts @;@ and @{@ gives each
+    -- the position of the token that opened the line
+    -- ("Thena.Surface.Layout"'s @Line@ and @Open@ markers), so there is nothing
+    -- to carry through the productions: the grammar reads it off the separator
+    -- in front of the declaration. A module written with explicit braces gets
+    -- the brace's or the semicolon's own position instead, which is the same
+    -- line and the column the author put the separator at.
+    --
+    -- **'Nothing' is a declaration that is in no file** — a @declare@ line at
+    -- the prompt reaches 'Thena.Surface.Parser.parseSurfaceDecls', where there
+    -- is no block and no separator before the first declaration.
   }
   deriving (Eq, Show)
 
@@ -425,7 +448,7 @@ data SurfaceDecl
     -- > two = succ zero
     --
     -- is one declaration under one @open@, and @succ@ resolves in both lines.
-  | SurfaceConsult Reach [String] String (Maybe [SurfaceDecl])
+  | SurfaceConsult Reach [String] String (Maybe [(Maybe Pos, SurfaceDecl)])
     -- ^ @consult ‹module›@, or @public consult ‹module›@ — **what this file's
     -- proofs are searched against** (MS11 phase 273, his ruling of
     -- 2026-11-03), and whether that base travels to whoever imports this file
@@ -454,7 +477,7 @@ data SurfaceDecl
     -- this file is searched against a @public consult@\'s base too, at the
     -- position of the @import@ line that brought it in. A surface file still
     -- has no rules of its own — it hands on a base and never contains one.
-  | SurfaceImport Reach [String] String Selection (Maybe [SurfaceDecl])
+  | SurfaceImport Reach [String] String Selection (Maybe [(Maybe Pos, SurfaceDecl)])
     -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
     -- modules this file depends on** (MS11 phase 274, his ruling of
     -- 2026-11-03), and whether what they gave it travels on (phase 287).
@@ -483,7 +506,7 @@ data SurfaceDecl
     -- module's names the importer may then write is not settled** — that is
     -- @exporting ( … )@ and @public import@, and until they are built
     -- everything the imported module declared is reachable.
-  | SurfaceNamespace [String] String [SurfaceDecl]
+  | SurfaceNamespace [String] String [(Maybe Pos, SurfaceDecl)]
     -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
     -- declarations in it** (MS10 phase 254).
     --
@@ -541,6 +564,24 @@ data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
   deriving (Eq, Show)
+
+-- | The plicity of each argument position a written type gives, outermost
+-- first.
+--
+-- Only a leading run of @∀@ groups is read: once the type stops being a
+-- quantifier there are no more named positions to speak of, and an arrow
+-- contributes an 'Explicit' one.
+--
+-- **Here and not in "Thena.Driver" since MS12 phase 321** (`~rskkv`), because a
+-- @let@ binding\'s annotation needs it and the op that reads one is below the
+-- driver. It was a local of @surfaceProgram@ until phase 320, when a @data@
+-- block\'s constructors needed it too.
+plicitiesIn :: Surface -> [Plicity]
+plicitiesIn t = case t of
+  SurfacePi bs body ->
+    [ p | SurfaceBinder p _ _ <- toList bs ] ++ plicitiesIn body
+  SurfaceArrow _ body -> Explicit : plicitiesIn body
+  _ -> []
 
 -- | Every @do@ block written inside a surface term, outermost first.
 --

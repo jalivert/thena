@@ -21,11 +21,19 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
+import Thena.Core.Term
+  (Core (..), Ident (..), Literal (..), close, fresh, rootName)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops
-  ( Instr (..)
+  ( CoreP (..)
+  , CoreSlot (..)
+  , LevelP (..)
+  , Identifier (..)
+  , Instr (..)
   , Pattern (..)
   , Value (..)
+  , corePSlots
   , matchPattern
   , matchPatterns
   , patternBinds
@@ -47,6 +55,7 @@ tests =
     , spelling
     , destructuring
     , refusals
+    , coreTerms
     , totality
     ]
 
@@ -81,6 +90,47 @@ everyPattern =
   , ("(some x)",      PSome (PVar "x"))
   , ("(some [a])",    PSome (PList [PVar "a"] Nothing))
   , ("none",          PNone)
+    -- **A core term, as of MS12 phase 352** (@~9j34x@). Every row here is
+    -- crossed with the printer below, so each of these also says that
+    -- 'Thena.Syntax.Print.corePText' writes a spelling the grammar takes
+    -- back — which a 'PObject' row cannot promise and this can, the
+    -- development calculus being Thena's own notation.
+    --
+    -- **@String@ is written because it resolves under nothing**: these go
+    -- through 'rootReading', whose environment holds the primitive types and
+    -- no declarations, which is also what makes the @not in scope@ refusal
+    -- below reachable.
+  , ("core`${x}`",    PCore (CPHole (PVar "x")))
+  , ("core`${f} ${a}`",
+        PCore (CPApp (CPHole (PVar "f")) (CPHole (PVar "a"))))
+  , ("core`trusted ${c} ${a} ${b}`",
+        PCore (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                         (CPHole (PVar "b"))))
+  , ("core`Type\8320`",  PCore (CPUniverse 0))
+  , ("core`String`",  PCore (CPName (rootName "String") []))
+  , ("core`String {0 1}`",
+        PCore (CPName (rootName "String") [LPNat 0, LPNat 1]))
+    -- **A level argument may be a splice as of MS12 phase 361** (@~bkrvn@),
+    -- and it round-trips as it was written.
+  , ("core`String {${l}}`",
+        PCore (CPName (rootName "String") [LPHole (PVar "l")]))
+  , ("core`3`",       PCore (CPLit (LInt 3)))
+    -- **The binders, as of MS12 phase 355.** One binder per quantifier is the
+    -- spelling the printer writes and the reader nests, so these round-trip;
+    -- @∀ (${x} : ${S}) (${y} : ${T}) ->@ is the same tree written shorter and
+    -- is tested in 'coreTerms' below.
+  , ("core`\8704 (${x} : ${t}) -> ${e}`",
+        PCore (CPPi (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`\955 (${x} : ${t}) -> ${e}`",
+        PCore (CPLam (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`let ${x} = ${v} : ${t} in ${e}`",
+        PCore (CPLet (PVar "x") (CPHole (PVar "v")) (CPHole (PVar "t"))
+                     (CPHole (PVar "e"))))
+    -- @_@ is the wildcard inside a region as it is anywhere else a pattern is
+    -- written, at a binder and at a term alike.
+  , ("core`\8704 (${_} : ${t}) -> ${e}`",
+        PCore (CPPi PWild (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`${_}`",    PCore (CPHole PWild))
   ]
 
 -- | Read a whole rule, for the binding cases above.
@@ -91,7 +141,7 @@ readWhole text = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule (rootReading []) raw of
+      Right raw -> case resolveRule "test" (rootReading []) raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right r
 
@@ -109,7 +159,7 @@ readParams src = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule (rootReading []) raw of
+      Right raw -> case resolveRule "test" (rootReading []) raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right (ruleParams r)
   where
@@ -221,56 +271,75 @@ matching =
   testGroup
     "matching"
     [ testCase "a variable takes anything and binds it" $
-        matchPattern emptyGlobals (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
+        match (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
     , testCase "a wildcard takes anything and binds nothing" $
-        matchPattern emptyGlobals PWild (VInt 3) @?= Just []
+        match PWild (VInt 3) @?= Just []
     , testCase "a literal matches its own value" $
-        matchPattern emptyGlobals (PInt 3) (VInt 3) @?= Just []
+        match (PInt 3) (VInt 3) @?= Just []
     , testCase "…and refuses another" $
-        matchPattern emptyGlobals (PInt 3) (VInt 4) @?= Nothing
+        match (PInt 3) (VInt 4) @?= Nothing
     , testCase "…and refuses another type" $
-        matchPattern emptyGlobals (PInt 3) (VText "3") @?= Nothing
+        match (PInt 3) (VText "3") @?= Nothing
     , testCase "true and false are told apart" $ do
-        matchPattern emptyGlobals (PBool True) (VBool True) @?= Just []
-        matchPattern emptyGlobals (PBool True) (VBool False) @?= Nothing
+        match (PBool True) (VBool True) @?= Just []
+        match (PBool True) (VBool False) @?= Nothing
     , testCase "a closed list must exhaust the value" $ do
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1])
+        match (PList [PVar "a"] Nothing) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
+        match (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
           @?= Nothing
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList []) @?= Nothing
+        match (PList [PVar "a"] Nothing) (VList []) @?= Nothing
     , testCase "an open list binds the remainder" $
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
+        match (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
           @?= Just [("a", VInt 1), ("r", VList [VInt 2])]
     , testCase "…and the remainder may be empty" $
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
+        match (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
           @?= Just [("a", VInt 1), ("r", VList [])]
     , -- The tail is a whole pattern, which is what makes this the long way of
       -- saying "exactly one element".
       testCase "a list tail is itself matched" $ do
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
+        match (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing)))
+        match (PList [PVar "a"] (Just (PList [] Nothing)))
                      (VList [VInt 1, VInt 2])
           @?= Nothing
     , testCase "a pair takes a pair apart" $
-        matchPattern emptyGlobals (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
+        match (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
           @?= Just [("x", VInt 1), ("y", VInt 2)]
     , testCase "some and none are told apart" $ do
-        matchPattern emptyGlobals (PSome (PVar "x")) (VOption (Just (VInt 1)))
+        match (PSome (PVar "x")) (VOption (Just (VInt 1)))
           @?= Just [("x", VInt 1)]
-        matchPattern emptyGlobals (PSome (PVar "x")) (VOption Nothing) @?= Nothing
-        matchPattern emptyGlobals PNone (VOption Nothing) @?= Just []
-        matchPattern emptyGlobals PNone (VOption (Just (VInt 1))) @?= Nothing
+        match (PSome (PVar "x")) (VOption Nothing) @?= Nothing
+        match PNone (VOption Nothing) @?= Just []
+        match PNone (VOption (Just (VInt 1))) @?= Nothing
     , -- **Arity is part of matching**, which is why 'matchPatterns' answers
       -- 'Nothing' rather than being paired with a length test.
       testCase "a run of the wrong length does not match" $ do
-        matchPatterns emptyGlobals [PVar "a"] [VInt 1, VInt 2] @?= Nothing
-        matchPatterns emptyGlobals [PVar "a", PVar "b"] [VInt 1] @?= Nothing
+        matchAll [PVar "a"] [VInt 1, VInt 2] @?= Nothing
+        matchAll [PVar "a", PVar "b"] [VInt 1] @?= Nothing
     , -- §3: a pattern matches as written. Nothing here reduces or coerces.
       testCase "a text pattern matches a name, because both are VText" $
-        matchPattern emptyGlobals (PText "h") (VText "h") @?= Just []
+        match (PText "h") (VText "h") @?= Just []
+
+    , -- **The name counter goes through the matcher** (MS12, §8), because a
+      -- pattern over a core term opens a binder and opening one mints. **No
+      -- pattern mints yet** and these are what say so: whatever a case binds,
+      -- the counter comes back exactly as it went in.
+      testCase "the counter comes back untouched, whatever was bound" $ do
+        fmap snd (matchPattern emptyGlobals 7 (PVar "x") (VInt 3)) @?= Just 7
+        fmap snd (matchPattern emptyGlobals 7
+                    (PList [PPair (PVar "a") (PVar "b")] (Just (PVar "r")))
+                    (VList [VPair (VInt 1) (VInt 2), VInt 3]))
+          @?= Just 7
+        fmap snd (matchPatterns emptyGlobals 7 [PVar "a", PWild] [VInt 1, VInt 2])
+          @?= Just 7
     ]
+  where
+    -- Matching threads the name counter (MS12). These cases are about what a
+    -- pattern binds, so they ask from zero and drop the counter; the counter
+    -- has the case directly above to itself.
+    match p v      = fmap fst (matchPattern emptyGlobals 0 p v)
+    matchAll ps vs = fmap fst (matchPatterns emptyGlobals 0 ps vs)
 
 binding :: TestTree
 binding =
@@ -302,9 +371,9 @@ binding =
         assertBool "refutable" (not (patternIrrefutable (PList [PVar "a"] (Just (PVar "r")))))
     ]
   where
-    agree (p, v) = case matchPattern emptyGlobals p v of
-      Nothing -> assertFailure ("expected a match for " ++ renderPattern p)
-      Just bs -> map fst bs @?= patternBinds p
+    agree (p, v) = case matchPattern emptyGlobals 0 p v of
+      Nothing       -> assertFailure ("expected a match for " ++ renderPattern p)
+      Just (bs, _)  -> map fst bs @?= patternBinds p
 
 -- --------------------------------------------------------------------------
 -- What is refused
@@ -345,9 +414,278 @@ refusals =
         Left e -> Left ("layout: " ++ show e)
         Right ts' -> case parseRule ts' of
           Left e -> Left ("parse: " ++ show e)
-          Right raw -> case resolveRule (rootReading []) raw of
+          Right raw -> case resolveRule "test" (rootReading []) raw of
             Left es -> Left ("resolve: " ++ show es)
             Right r -> Right r
+
+-- --------------------------------------------------------------------------
+-- A core term as a pattern (MS12 phase 352 — stage c, without the binders)
+-- --------------------------------------------------------------------------
+
+-- | **@~9j34x@: a rule can take a core term apart.**
+--
+-- Three things are crossed here, each with something that is not itself:
+--
+-- * __the reader against the forms it must refuse__ — every one of them is a
+--   term the development calculus writes, so a refusal that said "did not
+--   parse" would be wrong about why;
+-- * __the matcher against both spellings of a constructor application__, which
+--   is the case 'Thena.Instral.Ops.matchSkeleton' learned one language up:
+--   elaboration leaves a 'Canonical' and a written term is @App@s over a
+--   'Global';
+-- * __the written-then-reduced rule__ (his, 2026-09-20), with a β-redex, which
+--   needs no environment to exist.
+--
+-- The printer is crossed with the grammar in 'spelling' above, where the rows
+-- of 'everyPattern' carry it.
+coreTerms :: TestTree
+coreTerms =
+  testGroup
+    "a core term as a pattern"
+    [ testCase "a bare word resolves to the global it names" $
+        readPattern "core`String`" @?= Right (PCore (CPName strName []))
+
+    , -- §8: refused when the base is READ, because a word that names nothing
+      -- is a clause that could never match.
+      testCase "…and one that names nothing is refused at load" $
+        expect "core`nope`" "CorePatternNotInScope"
+
+    , testCase "a level is written in braces and compared whole" $
+        readPattern "core`String {0}`"
+          @?= Right (PCore (CPName strName [LPNat 0]))
+
+    , -- The development calculus's own reading, not a rule of the pattern's:
+      -- a word with no braces is @Global g []@ when it is written in an
+      -- operand, so that is what it matches here.
+      testCase "no braces means no level arguments" $ do
+        matchTerm (CPName strName []) (Global strName []) @?= Just []
+        matchTerm (CPName strName []) (Global strName [LZero]) @?= Nothing
+        matchTerm (CPName strName [LPNat 0]) (Global strName [LZero]) @?= Just []
+
+    , -- **A LEVEL ARGUMENT IS A POSITION AS OF MS12 PHASE 361** (@~bkrvn@), and
+      -- the level it takes is taken WHOLE: a rigid parameter is exactly the
+      -- level a rule cannot write down, which is why pinning a numeral was not
+      -- an answer. Nothing matches inside the level either way.
+      testCase "a splice takes the level the term is at, whatever it is" $ do
+        matchTerm (CPName strName [LPHole (PVar "l")]) (Global strName [LZero])
+          @?= Just [("l", VLevel LZero)]
+        matchTerm (CPName strName [LPHole (PVar "l")]) (Global strName [rigid])
+          @?= Just [("l", VLevel rigid)]
+        matchTerm (CPName strName [LPHole PWild]) (Global strName [rigid])
+          @?= Just []
+
+    , -- The contrast that says what the splice is for: a written numeral is
+      -- the only thing a clause could say before, and it misses every level
+      -- that is not that numeral.
+      testCase "…where a written numeral matches that level and no other" $ do
+        matchTerm (CPName strName [LPNat 0]) (Global strName [rigid]) @?= Nothing
+        matchTerm (CPName strName [LPNat 0]) (Global strName [levelOfNat 1])
+          @?= Nothing
+
+    , -- 'corePSlots' is what the type checker reads, so a level position has
+      -- to report itself there or the binding would be typed as a term.
+      testCase "and the position reports itself as a level" $
+        corePSlots (CPName strName [LPHole (PVar "l")])
+          @?= [(AtLevel, PVar "l")]
+
+    , testCase "a universe is matched at its level" $ do
+        matchTerm (CPUniverse 0) (Universe LZero) @?= Just []
+        matchTerm (CPUniverse 1) (Universe LZero) @?= Nothing
+        matchTerm (CPUniverse 1) (Universe (levelOfNat 1)) @?= Just []
+
+    , testCase "a hole binds whatever term stands at it" $
+        matchTerm (CPHole (PVar "t")) (Universe LZero)
+          @?= Just [("t", VTerm (Universe LZero))]
+
+    , -- All three fields, the derived @actual@ included: that is what makes the
+      -- obligation readable from a rule.
+      testCase "a trusted node has three positions" $
+        matchTerm (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                             (CPHole (PVar "b")))
+                  (Trusted (Universe LZero) (Universe (levelOfNat 1)) star)
+          @?= Just [ ("c", VTerm (Universe LZero))
+                   , ("a", VTerm (Universe (levelOfNat 1)))
+                   , ("b", VTerm star)
+                   ]
+
+    , -- **The case the object-language matcher already had to learn.** A
+      -- written application and a saturated former are the same term and
+      -- neither spelling is wrong.
+      testCase "an application matches both spellings of one term" $ do
+        matchTerm applied (App (Global strName []) star)
+          @?= Just [("x", VTerm star)]
+        matchTerm applied (Canonical strName [] [star])
+          @?= Just [("x", VTerm star)]
+
+    , -- Matching is as written: @f a@ is one application and @f a b@ is two.
+      testCase "…and not an application of a different arity" $
+        matchTerm applied (App (App (Global strName []) star) star) @?= Nothing
+
+    , -- A head that is a hole is matched node by node, or flattening both
+      -- spines would ask for two arguments where one was written.
+      testCase "a hole at the head takes the whole function" $
+        matchTerm (CPApp (CPHole (PVar "f")) (CPHole (PVar "a")))
+                  (App (App (Global strName []) star) star)
+          @?= Just [ ("f", VTerm (App (Global strName []) star))
+                   , ("a", VTerm star)
+                   ]
+
+    , -- His rule of 2026-09-20, and it is one rule for every pattern: tried as
+      -- written, then reduced and tried again.
+      testCase "a term is tried as written and then reduced" $
+        matchTerm (CPUniverse 0) redex @?= Just []
+
+      -- ----------------------------------------------------------------
+      -- The binders — MS12 phase 355
+      -- ----------------------------------------------------------------
+
+    , -- **THE WHOLE POINT OF THE LANDING, IN ONE ASSERTION.** A binder's
+      -- identity and the body opened at it must name the SAME variable: the
+      -- @${x}@ carries the token, the @${E}@ holds a term with that token free
+      -- in it, and @intro@ adopting the token is what makes the pair real
+      -- (@~gr236@). Were they to disagree the two would print one word and mean
+      -- two binders, which is the defect @~thwhg@ was opened for.
+      testCase "a universal binds its binder, its domain and its opened body" $
+        matchFrom 0 (CPPi (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e")))
+                    (Pi (Ident "A") star (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "A") (Just mintedVar)))
+                   , ("t", VTerm star)
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+
+    , -- **Opening a scope is what mints**, so this is the one pattern form that
+      -- spends the counter the matchers have threaded since MS12 phase 351.
+      testCase "matching a binder advances the counter by one" $
+        fmap snd (matchPattern emptyGlobals 7
+                    (PCore (CPPi PWild (CPHole PWild) (CPHole PWild)))
+                    (VTerm (Pi (Ident "A") star (close someVar star))))
+          @?= Just 8
+
+    , testCase "a lambda and a let are the same question" $ do
+        matchFrom 0 (CPLam (PVar "x") (CPHole PWild) (CPHole (PVar "e")))
+                    (Lam (Ident "f") star (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "f") (Just mintedVar)))
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+        matchFrom 0 (CPLet (PVar "x") (CPHole (PVar "v")) (CPHole (PVar "t"))
+                           (CPHole (PVar "e")))
+                    (Let (Ident "d") star (Universe (levelOfNat 1))
+                         (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "d") (Just mintedVar)))
+                   , ("v", VTerm star)
+                   , ("t", VTerm (Universe (levelOfNat 1)))
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+
+    , -- §8: @->@ is a binder too, non-dependent or not. Its body sits under a
+      -- scope like any other, so it is opened to be matched; what the pattern
+      -- declines to say is what it was opened at.
+      testCase "an arrow is a universal whose binder is not named" $ do
+        readPattern "core`${s} -> ${b}`"
+          @?= Right (PCore (CPPi PWild (CPHole (PVar "s")) (CPHole (PVar "b"))))
+        matchFrom 0 (CPPi PWild (CPHole (PVar "s")) (CPHole (PVar "b")))
+                    (Pi (Ident "A") star (close someVar star))
+          @?= Just [("s", VTerm star), ("b", VTerm star)]
+
+    , -- **A binder group nests**, exactly as it does when a term is resolved:
+      -- 'Thena.Core.Term.Pi' binds one thing, so two written in one group are
+      -- two patterns.
+      testCase "a binder group is as many patterns as it has binders" $
+        readPattern "core`\8704 (${x} : ${s}) (${y} : ${t}) -> ${e}`"
+          @?= Right (PCore (CPPi (PVar "x") (CPHole (PVar "s"))
+                                 (CPPi (PVar "y") (CPHole (PVar "t"))
+                                       (CPHole (PVar "e")))))
+
+    , -- A pattern says which form it wants and the others do not match it.
+      testCase "a binder form matches its own node and no other" $ do
+        matchTerm (CPPi PWild (CPHole PWild) (CPHole PWild))
+                  (Lam (Ident "f") star (close someVar star)) @?= Nothing
+        matchTerm (CPLam PWild (CPHole PWild) (CPHole PWild))
+                  (Pi (Ident "A") star (close someVar star)) @?= Nothing
+
+    , -- **A hole at a binder is typed 'TIdent' and nowhere else**, which is
+      -- what lets @call intro x@ be written with nothing annotated (@~gr236@).
+      testCase "a binder's hole stands at a name and the rest at terms" $
+        map fst (corePSlots (CPPi (PVar "x") (CPHole (PVar "t"))
+                                  (CPHole (PVar "e"))))
+          @?= [AtBinder, AtCore, AtCore]
+
+    , -- @spec/machine.md@ §8: the counter is threaded and nothing mints yet.
+      testCase "the counter comes back untouched" $
+        fmap snd (matchPattern emptyGlobals 7
+                    (PCore (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                                      (CPHole (PVar "b"))))
+                    (VTerm (Trusted star star star)))
+          @?= Just 7
+
+    , -- **A BINDER POSITION BINDS, SO IT TAKES A SPLICE AND NOTHING ELSE**
+      -- (MS12 phase 355). A bare word inside a region resolves to a /global/,
+      -- which a binder's name is not, and a binder's word decides nothing, so
+      -- there is nothing a written one could mean.
+      testCase "a written word where a binder is bound is refused" $ do
+        expect "core`\8704 (x : String) -> String`" "CorePatternForm"
+        expect "core`\955 (x : String) -> x`" "CorePatternForm"
+        expect "core`let x = ${v} : ${t} in ${e}`" "CorePatternForm"
+
+    , -- @Type@ with no level asks for an inference that has nothing to run
+      -- against while a pattern runs. It is the one form the development
+      -- calculus writes that a pattern will not read at any landing.
+      testCase "Type with no level is refused" $
+        expect "core`Type`" "CorePatternForm"
+
+    , -- **An elimination's fields are positions too**, in
+      -- 'Thena.Core.Term.Eliminate''s own order, which is the order the
+      -- development calculus writes them in.
+      testCase "an elimination is matched field by field" $
+        matchTerm (CPEliminate strName [] [] (CPHole (PVar "m")) [] []
+                               (CPHole (PVar "t")))
+                  (Eliminate strName [] [] star [] [] (Universe (levelOfNat 1)))
+          @?= Just [ ("m", VTerm star)
+                   , ("t", VTerm (Universe (levelOfNat 1)))
+                   ]
+
+    , -- **A position that wants a GLOBAL is the mirror of a binder's**: it
+      -- refers, so it takes a word and a splice there is refused.
+      testCase "a splice where a global's name is written is refused" $
+        expect "core`elim ${d} () ${m} () () ${t}`" "CorePatternForm"
+
+    , -- Stage b, parked by him (@~6z6nx@). Said as itself rather than as an
+      -- unknown tag, which is what the grammars would have answered.
+      testCase "a surface pattern says it is not read, not that the tag is unknown" $
+        expect "surface`a -> b`" "CorePatternForm"
+    ]
+  where
+    strName = rootName "String"
+    star    = Universe LZero
+
+    -- A definition's prenex level parameter: a level with no numeral, and the
+    -- case @~bkrvn@ was about.
+    rigid   = LVar (LRigid 0)
+
+    applied = CPApp (CPName strName []) (CPHole (PVar "x"))
+
+    -- A β-redex: @(λ x : Type₀ . Type₀) Type₀@, which whnf answers @Type₀@.
+    -- Nothing has to be declared for this to reduce, which is why it is the
+    -- case the reduce rule is tested with.
+    redex =
+      let (v, _) = fresh 0
+       in App (Lam (Ident "x") star (close v star)) star
+
+    -- **'Thena.Core.Term.Var''s constructor is not exported** — 'fresh' is the
+    -- only way to mint one, which is what makes a dangling index
+    -- unconstructible (§3.4). So a test that needs a particular variable asks
+    -- for it by the counter it comes off.
+    someVar   = fst (fresh 9)   -- what a hand-built scope is closed over
+    mintedVar = fst (fresh 0)   -- what a match from 0 mints for the binder
+
+    matchTerm cp t = fmap fst (matchPattern emptyGlobals 0 (PCore cp) (VTerm t))
+
+    -- The same, from a named counter, for the forms that mint.
+    matchFrom k cp t = fmap fst (matchPattern emptyGlobals k (PCore cp) (VTerm t))
+
+    expect src want = case readPattern src of
+      Right p -> assertFailure ("expected a refusal, got " ++ show p)
+      Left e  -> assertBool (src ++ " said " ++ e) (want `isInfixOf` e)
 
 -- --------------------------------------------------------------------------
 -- The mirror is total
@@ -382,6 +720,7 @@ representatives :: [Pattern]
 representatives =
   [ PVar "x", PWild, PInt 0, PChar 'c', PBool True, PText ""
   , PList [] Nothing, PPair PWild PWild, PSome PWild, PNone
+  , PCore (CPHole PWild)
   ]
 
 tagOf :: Pattern -> String
@@ -394,6 +733,7 @@ tagOf p = case p of
   PText _   -> "PText"
   PList _ _ -> "PList"
   PObject _ -> "PObject"
+  PCore _   -> "PCore"
   PPair _ _ -> "PPair"
   PSome _   -> "PSome"
   PNone     -> "PNone"

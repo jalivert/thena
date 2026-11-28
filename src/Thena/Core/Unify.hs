@@ -54,6 +54,7 @@ import Thena.Development.Cursor
   , below
   , context
   , focus
+  , insertAt
   , overComponents
   , overConstraints
   , overLevels
@@ -248,6 +249,34 @@ chain cur = index 0 (above ++ here ++ under)
     index i (Nothing : es) = index (i + 1) es
     index i (Just (x, k) : es) = (i, x, k) : index (i + 1) es
 
+-- | The chain's links with their positions, the component where there is one
+-- (MS12 phase 320).
+--
+-- **The same spine in the same order as 'chain' and 'chainValues'**, which is
+-- 'stepsOf'\'s reason for existing; what differs is only what comes back. What
+-- wants it is 'strengthen', which has to know whether anything between two
+-- positions /binds/ — a question 'Kind' cannot answer, since it calls a
+-- definition and an assumption both rigid.
+chainLinks :: Cursor -> [(Int, Maybe Component)]
+chainLinks cur = zip [0 ..] (above ++ here ++ under)
+  where
+    above = map ofStep (stepsOf (prefix cur))
+    here  = case focus cur of
+      OnComponent c  -> [Just c]
+      OnConstraint _ -> [Nothing]
+      OnTerm {}      -> [Nothing]
+    under = maybe [] links (below cur)
+
+    ofStep s = case s of
+      Along c              -> Just c
+      Past _               -> Nothing
+      IntoGuess x i ty p   -> Just (Guess x i p ty)
+
+    links p = case p of
+      Trailing _     -> []
+      Under c rest   -> Just c : links rest
+      Pending _ rest -> Nothing : links rest
+
 kindOf :: Component -> (Var, Kind)
 kindOf c = case c of
   Assume x _ _    -> (x, KRigid)
@@ -389,8 +418,93 @@ flexRigid env st ctx k x i args rhs = case patternArgs (kinds (stCur st)) ctx ar
         let sol = demote st i (lamOver es rhs)
          in case scopeCheck st i sol of
               OutOfScope y -> Left (ScopeViolation ctx x y, stNames st)
-              MightCome    -> park env st k
+              MightCome    -> case strengthen st i sol of
+                Just (st', sol') -> Right (solve x sol' st')
+                Nothing          -> park env st k
               InScope      -> Right (solve x sol st)
+
+-- | Make a solution legal where the hole is, by claiming a copy of every hole
+-- it mentions that is bound too late (MS12 phase 320, `~td9j6`).
+--
+-- **THE PROBLEM, AND IT IS NOT AN EDGE CASE.** §6.4 lets a hole be solved only
+-- with what is bound before it, and elaboration claims a hole per argument in
+-- the order the arguments are written — so a derivation nested inside another
+-- states equations in both directions. @E-beta V-abs@ has to solve E-beta's own
+-- @?N@ with @( λ x : T . E )@ over V-abs's three holes, which are claimed later
+-- because V-abs is elaborated later; @SA-All p1 p2 SA-Top@ has to solve
+-- SA-Top's @?Γ@ with @Γ , X <: T1@ over SA-All's, which are claimed earlier. No
+-- order satisfies both, so where the hole goes cannot be the answer: one of the
+-- two directions has to be repaired after the fact.
+--
+-- **THE REPAIR ADDS INFORMATION AND MOVES NOTHING**, which is why it is this
+-- and not OLEG's @raise@ (table 2.8) or Gundry's @DEPEND_S@. For each hole the
+-- solution mentions that sits at or after the hole being solved, a fresh hole
+-- of the same type is claimed /before/ it, the late one is solved with the
+-- fresh one — legal, since it is the later of the two — and the solution is
+-- rewritten to name the copy. Every step is an information-order step, which
+-- the development calculus's monotonicity metatheorem is stated in terms of
+-- (OLEG §2.2); permuting two components is not a step of that order at all.
+-- "Thena.Errors"' 'Thena.Errors.ScopeViolation' says the repair is a tactic's
+-- decision rather than a unifier's, and that still holds of @raise@: this
+-- neither moves the user's work nor changes the shape of what they wrote.
+--
+-- **IT ONLY FIRES WHERE EVERY OFFENDER IS A HOLE WHOSE TYPE IS ALREADY LEGAL
+-- HERE.** A guess is left alone (§6.3 makes it a blocked neutral, and the
+-- user's work in progress is not to be touched), and a type that itself
+-- mentions something bound too late is not copied — so a dependent telescope
+-- parks exactly as it did. 'Nothing' means /nothing was done/, and the caller
+-- parks, so the worst case is the behaviour before this existed.
+strengthen :: St -> Int -> Core -> Maybe (St, Core)
+strengthen st i sol = case offenders of
+  [] -> Nothing
+  os -> Just (foldl copy (st, sol) (zip [0 ..] os))
+  where
+    table = chain (stCur st)
+
+    -- A hole the solution mentions, bound at or after the hole being solved,
+    -- whose own type may stand before it, **and with no binder in between**.
+    -- Anything else stops the repair.
+    --
+    -- **The binder condition is what keeps the repair from losing solutions.**
+    -- Tying the late hole to a copy bound earlier narrows what it can ever be
+    -- solved with to what is in scope there; crossing only holes and
+    -- definitions, that is the same scope — a definition is δ-unfolded by
+    -- 'demote' and a crossed hole's own solution, once it has one, is unfolded
+    -- the same way. Crossing a λ or a ∀ would take a binder out of reach, and
+    -- the deferral has to stand instead: @k@ may yet be solved with something
+    -- bound between the two, which is exactly what the parked equation is
+    -- waiting for.
+    offenders =
+      [ (y, ident, ty)
+      | y <- freeVars sol
+      , (j, z, KHole ident ty) <- table
+      , z == y
+      , j >= i
+      , InScope <- [scopeCheck st i ty]
+      , not (binderBetween i j)
+      ]
+
+    -- A component between the two positions that binds something: an
+    -- assumption, a ∀-binder, or a guess the focus is inside. A 'Define' is
+    -- not one — it has a value, so nothing is out of reach behind it.
+    binderBetween lo hi =
+      or [ True | (p, c) <- chainLinks (stCur st), p >= lo, p < hi, binds c ]
+
+    binds c = case c of
+      Just (Assume {})   -> True
+      Just (Quantify {}) -> True
+      Just (Guess {})    -> True
+      Nothing            -> False   -- a constraint binds nothing
+      _                  -> False
+
+    -- One copy, claimed at the hole's own position. Each one claimed pushes
+    -- the rest down, so the position stays the same and the copies keep the
+    -- order the solution mentions them in.
+    copy (st0, sol0) (n, (y, ident, ty)) =
+      let (v, n1) = fresh (stNames st0)
+          cur     = insertAt (i + n) (Claim v ident ty) (stCur st0)
+          st1     = st0 { stCur = cur, stNames = n1 }
+       in (solve y (Free v) st1, substFree y (Free v) sol0)
 
 -- | The arguments as a telescope, if every one is a distinct variable that is
 -- local to the equation. The entries come from the live context, so the

@@ -247,14 +247,20 @@ qualifiedGlobals =
 
 -- | The case that cannot be written in concrete syntax and must still print
 -- correctly: two nested binders with the same identifier, where the body refers
--- to the /outer/ one. Without freshening this prints as
--- @λ (x : _) (x : _) -> x@ and re-parses to the inner binder — a different term.
+-- to the /outer/ one.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/. The
+-- printer used to rename the inner binder to @x1@ so that the text re-parsed to
+-- the same term; the word @x1@ was then in no scope, which is the lie the
+-- ruling removes. Both binders now print as @x@ and the body's reference to the
+-- outer one is marked, so **the text no longer re-parses — deliberately, and
+-- only for a term that mentions a binder whose word was taken.**
 shadowTests :: [TestTree]
 shadowTests =
-  [ testCase "the inner binder is renamed, so the body still reparses" $
-      assertBool (renderCore (rendering [] 500) [] shadowed) (roundTrips shadowed 500)
-  , testCase "and the two binders really do print differently" $
-      renderCore (rendering [] 500) [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
+  [ testCase "a reference to the dead binder does not read back, and that is the cost" $
+      assertBool (renderCore (rendering [] 500) [] shadowed) (not (roundTrips shadowed 500))
+  , testCase "both binders keep the word, and the reference carries the mark" $
+      renderCore (rendering [] 500) [] shadowed @?= "λ (x : Type₀) (x : Type₀) -> x†"
   ]
 
 shadowed :: Core

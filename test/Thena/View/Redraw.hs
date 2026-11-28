@@ -42,6 +42,7 @@ import Thena.View.Core
   ( Binding (..)
   , Display (..)
   , ObjectItem (..)
+  , Reachable (..)
   , Shape (..)
   )
 import Thena.View.Surface
@@ -60,7 +61,11 @@ redraw :: Display -> String
 redraw = at Loose
   where
     at prec (Display here s) = case s of
-      AVariable nm _ -> nm
+      -- **The mark is the editor's to draw and the flag is what crosses** --
+      -- his ruling of 2026-11-20. A word that reaches nothing has to look
+      -- different from one that does, or the text this model editor produces
+      -- claims the outer binder answers to a word the inner one took.
+      AVariable nm reach _ -> nm <> mark reach
       AGlobal g ls -> g <> levels ls
       AUniverse l -> l
       ALiteral t -> t
@@ -179,7 +184,7 @@ data Prec = Loose | Spine | Atom
 -- which binder it belongs to. Nothing about the term's internals crosses.
 occurs :: Address -> Display -> Bool
 occurs a (Display _ s) = case s of
-  AVariable _ b -> b == Just a
+  AVariable _ _ b -> b == Just a
   AnApplication f x -> occurs a f || occurs a x
   AFunction b body -> occurs a (bindingType b) || occurs a body
   AnAbstraction b body -> occurs a (bindingType b) || occurs a body
@@ -358,3 +363,9 @@ markedChainText :: [LinkView] -> String
 markedChainText = intercalate "\n" . map gutter . redrawChain
   where
     gutter (marked, t) = (if marked then "\9654 " else "  ") ++ t
+
+-- | What this editor does with 'Reachable'.
+mark :: Reachable -> String
+mark r = case r of
+  Reachable   -> ""
+  Unreachable -> "†"

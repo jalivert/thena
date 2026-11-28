@@ -27,8 +27,9 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-11-10, when the module
-system's five were accepted. The dot was reserved on 2026-10-30, for namespaces.*
+reviewed whenever a word is reserved — most recently 2026-11-26, when `at` was
+taken for the focus pattern in a rule head. The dot was reserved on 2026-10-30,
+for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -41,9 +42,8 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` |
 | a tagged literal's fence | `` ` `` |
-| spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` `at` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -56,11 +56,13 @@ because the gain is five names nobody has asked for and the price is a special c
 word in the grammar. **The module system's five — `consult`, `import`, `exporting`,
 `private`, `public` — were taken on that basis**, and the row above is the whole list.
 
-**The corners are reserved and spell nothing**, which is the one oddity in the
-table: they were the old notation for an embedded core term, removed on
-2026-11-04, and they stay out of names because the system hoists a written term
-into a binding it calls `⌜1⌝` — a name you cannot write and so cannot collide
-with.
+**The table has no oddity left in it — decided 2026-11-21.** `⌜` and `⌝` were the old
+notation for an embedded core term, removed on 2026-11-04, and they stayed reserved for
+three weeks after they spelled nothing: the system hoists a written term into a binding of
+its own, and that binding's name has to be one you cannot write. **It is called `'1` now.**
+A single quote may continue a name — `x'` is an ordinary identifier — but it may not *start*
+one, so `'1` is a name no source of yours can produce. The corners are ordinary characters
+again, which means `foo⌜bar` is a legal name in any language you model.
 
 **The dot is the one character reserved for a structural reason**, and it is the
 namespace separator: `List.map` is the name `map` in `List`, and a name may not
@@ -150,10 +152,11 @@ core`t`                is: the same thing, and the only spelling
 surface`e`             is: the same thing, and the only spelling
 ```
 
-**Writing one now is a syntax error.** `⌜` and `⌝` are still reserved characters, so
-a corner is refused by the lexer; `⟨` and `⟩` are ordinary name characters again, so
-`⟨ e ⟩` is read as names and refused for not being in scope. There is nothing to
-migrate — a term of any language, Thena's own two included, is written `tag`text``.
+**Writing one now is a name that is not in scope.** All four characters are ordinary
+name characters again — `⟨` and `⟩` since the removal, `⌜` and `⌝` since 2026-11-21 — so
+`⌜ t ⌝` and `⟨ e ⟩` are read as names and refused for not being declared. There is
+nothing to migrate — a term of any language, Thena's own two included, is written
+`tag`text``.
 
 **The replacement became one-for-one on 2026-11-03, which is what made the removal
 possible.** It was not before: `` core`t` `` was refused inside a
@@ -250,6 +253,77 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ## Modules and namespaces
 
+### An import typed at the prompt loads a module as far as it can
+
+*Decided 2026-11-11, built 2026-11-13.* A surface module that does not elaborate
+whole declares nothing — that has been the rule since 2026-09-30, and it is
+still the rule for `thena-check`, for the prelude, and for a module a rule base
+pulls in. **At a prompt it is not.** `import Foo` tries every declaration in
+turn: what elaborates lands and is usable, and what does not is set aside and
+reported.
+
+```
+thena spine> import test.modules.PartlyGood
+module test.modules.PartlyGood
+  declared Flag
+  declared first
+  declared after
+  broken did not go in:
+    stuck: not in scope: nonesuch
+```
+
+`after` is written *below* `broken` in the file and has nothing to do with it,
+so it lands. **The loader works out nothing about why anything failed** — it
+tries the next declaration. A module whose third definition is broken therefore
+reports one failure and names the rest as pending, rather than forty-seven
+copies of *not in scope*.
+
+**The motive is debugging, and it is the whole of the design.** A module is a
+unit, but a unit you cannot open is a tool that stops helping at the moment the
+work gets hard: you cannot reach the theorem you finished because it shares a
+file with one you have not.
+
+**Leniency belongs to the act you typed, not to the file.** There is no mode and
+no flag on the session. Everything the typed act pulls in is lenient too,
+however deep — if you type `import A` and `A` imports `B`, then `B` loads as far
+as it can as well, because the seam is *where the act was typed* and a seam one
+level down would be the loader asking which situation it is in. A module's own
+`import` line is unaffected: it states a dependency, it does not type an act.
+
+**Atomicity moved down a level rather than away.** A declaration that does not go
+through leaves nothing behind, so fixing the file and loading it again never
+collides with the broken attempt's leavings — which is what the 2026-09-30 rule
+was protecting. And a load is still one command: nothing observes the
+environment partway through it, so the global environment is the same before the
+line and after it.
+
+**What a frontend is given**, all through `Thena.Driver`: `moduleWhole` and
+`modulePartly` make what a module's status is three-valued — in, partly in,
+absent — `modulesPartly` lists the partial ones with their unfinished
+declarations in file order, and `moduleImportsOf` gives the edges of the import
+tree, which nothing kept before.
+
+**Each unfinished declaration says where it was written.** A line and a column,
+on `unfinishedAt`, so a frontend's row for it can be a place to go and not just
+a sentence — with the module's own file path, that is a destination. A
+declaration that reached the system as a tree rather than as text has no
+position, and says so.
+
+**A block is not a unit of atomicity either.** *Decided 2026-11-22.* The loader
+walks into a `namespace`, `import … where`, `consult … where`, `private` or
+`open … in` block: the ops that open it run, its declarations are elaborated one
+at a time, and it is closed at the end. So one unfinished proof inside
+`namespace lemmata where { … }` leaves the rest of the group in, and what is
+written down as unfinished is the inner declaration — named under the block's
+prefix, at its own line and column. A block's own *entry* is still
+all-or-nothing, since there is nowhere to put what it holds if its namespace
+cannot be entered or its base cannot be pushed; and a block still ends where it
+ended, so its `open`s come off with it and the names an `import … where` reveals
+are writable in it and not after it.
+
+**Not yet**: a declaration that was left behind is reported, not resumable. It
+cannot be picked up at the prompt and finished.
+
 ### A generated substitution names its class as a path, not as a suffix
 
 *Decided 2026-11-10.* A language's substitution family is **three namespaces and
@@ -277,8 +351,27 @@ silent. **`*` cannot begin a name**, so no token class can ever be spelled it,
 while `subst-*` itself begins with a letter and is ordinary to type.
 
 **What a reader sees is the shortest ending that still means it**, so `subst.x`
-wherever the language is open. The full name is absolute: a class declared beside
-its language inside `namespace A` is `A.LC.subst.A.x`.
+wherever the language is open.
+
+**The path inside `subst` drops the steps the language's own name has already
+said.** A class declared beside its language inside `namespace A` is `A.x`, and
+the function is `A.LC.subst.x` — not `A.LC.subst.A.x`, which would put the
+module's name into every qualified substitution a reader writes.
+
+**A class from a different module keeps its whole path, and that is what you
+type.** The two names share nothing to drop, so a language `Ex` declared in
+`Stlc05GroupingBySplicing` that substitutes the class `x` declared in
+`Stlc01Syntax` gets
+
+```
+examples.Stlc05GroupingBySplicing.Ex.subst.examples.Stlc01Syntax.x
+```
+
+written in that file as `Ex.subst.examples.Stlc01Syntax.x`. *Decided 2026-11-12,
+after the alternative — teaching a written name to leave steps out of the middle
+and not only off the front — was weighed and deferred to its own design
+question.* It is long, and it is the name the printer shows you, so there is one
+spelling to learn rather than two.
 
 **And a written substitution says which class it is for**, which is the decision
 below.
@@ -707,6 +800,19 @@ isolation**, and that is what makes a module that type-checks for its author typ
 for whoever imports it. Nineteen files in the shipped `examples/` relied on the old flat
 scope and were fixed rather than accommodated.
 
+**A MODULE'S DECLARATIONS LIVE UNDER THE NAME ITS HEADER GIVES IT.** `module M where`
+is a namespace block: everything the file declares is named inside it — `M.LC`,
+`M.LC.LC`, `M.x` — and the file's own body resolves with `M` innermost, so nothing you
+write changes. **Two files may each declare a language called `LC`**, and the bare word
+is then an ambiguity refused where you *write* it, naming both, exactly as two `open`s
+of one word are. Decided 2026-11-12, built MS12 phase 313.
+
+*Until that phase the isolation above was stated and not true. A module's own
+declarations were worked out by subtracting the session from itself, which cannot see a
+name the session already held — so a file could not see a name it had declared itself,
+its own interface dropped that name, and a second definition silently answered every
+lookup in its place. Three defects, one cause.*
+
 **The prelude needs no import** — it is the one module every other one may reach, so
 `Eq` and `refl` are there whatever you wrote; `import Prelude` is allowed and does
 nothing. **The prompt is not a module**: a line you type reaches everything the session
@@ -887,6 +993,172 @@ half an import graph.
 **Which of an imported module's names you may write is up to the file you imported** —
 see *A header says what the file exports* below. An import reaches what that file
 exports, and nothing it imported unless it said `public import`.
+
+### An import can stop in the middle and hand you the proof it got stuck on
+
+*Decided 2026-11-11, built MS12 phase 309.*
+
+Importing a module is not a special operation. **A module's declarations are turned
+into one program and that program is run by the same machine, through the same loop,
+as a line you type** — so an import is one line whose program happens to be long. The
+consequence is the feature: a program can stop, so an import can stop.
+
+It stops when a rule says `yield`. The shipped rule base never does; a rule base you
+consult may, and four lines are enough:
+
+```
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"
+```
+
+With that consulted, importing a file that leaves a hole hands you **that
+declaration's own goal**, in that module's own scope — not a scratch goal, and not the
+session's scope. Fill it, type `yield`, and the import carries on and finishes,
+including any further modules the closure still had to load.
+
+**Nothing is declared until the whole import finishes.** A module that does not load
+whole declares nothing — the 2026-09-30 rule — and a suspended load is one command
+that has not come back, not a module that half went in. So `:abandon` while it is
+standing puts the session back exactly as it was. **It takes anything you declared at
+the prompt in the meantime with it, and says so**: a lemma you proved during the
+suspension may rest on the module's earlier declarations, and taking only the
+module's would leave a reference dangling.
+
+**What is in scope while you hold the wheel is what the elaboration had**, which is
+the module's imports and what it has declared so far — not the rest of your session.
+You are standing inside that file's elaboration, so the session's other names stay
+concealed exactly as they are concealed from the file itself.
+
+Three things are refused while a load is standing still:
+
+- a second `import` — one in flight;
+- `:theorem` — a proof boundary empties the machine's program, so opening a theorem
+  would throw the suspended elaboration away. The refusal names both ways out: hand
+  the wheel back, or park the import (below);
+- a `yield` out of a file reached by `thena-check` or by a rule base's own imports,
+  because there is no prompt there to hand control to.
+
+**A name you declare at the prompt during a suspension is yours, not the module's.**
+What a module declared is what its text wrote; a lemma proved to get unstuck is not
+one of those, so a module with no `exporting` clause does not pass it on to whoever
+imports it. Otherwise one file would offer different names depending on how a session
+happened to go.
+
+### A parked import sits in `:proofs` beside your proofs
+
+*Decided 2026-11-11, built MS12 phase 310.*
+
+The reason to be handed a module's goal is usually that it needs a lemma, and a lemma
+is a theorem — which the previous section says you cannot start while the import is
+standing. **So you park the import**, and it goes in the one list you already have.
+Here `Demo07Holes` declares `zeroIsValue` and leaves its proof a placeholder, so
+importing it hands you that declaration's goal:
+
+```
+thena spine> :suspend
+parked the import of examples.demo.pending.Demo07Holes
+  it is in :proofs — :resume examples.demo.pending.Demo07Holes to carry on with it
+thena spine> :proofs
+  examples.demo.pending.Demo07Holes : an import, standing in a yield
+thena spine> :theorem helper : value`0 value`
+proving helper : value`0 value`
+thena spine> try-core core`V-num zero NV-zero`
+thena spine> solve
+thena spine> qed
+helper : value`0 value`   ∐
+thena spine> :resume examples.demo.pending.Demo07Holes
+picked the import of examples.demo.pending.Demo07Holes back up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
+thena spine> try-core core`helper`
+thena spine> solve
+thena spine> yield
+module examples.demo.pending.Demo07Holes
+  declared zeroIsValue
+```
+
+**The lemma you proved at the prompt is what filled the module's hole**, and the
+module landed when you handed the wheel back. Every step of that is a line you type.
+
+**`:suspend`, `:resume`, `:proofs` and `:abandon` do not distinguish the two kinds of
+thing in that list.** A proof has a statement and `qed` certifies it; a parked import
+has the name you imported it by and nothing certifies it. Beyond that they are one
+kind of thing, which is why there is no second word for parking an import and no
+second list to look in.
+
+**Nothing parks or unparks itself.** `qed` does not hand the import back the wheel —
+you pick it up when you want it. A boundary that unstacked implicitly would mean two
+things driving the session and no way to see which was about to move.
+
+**What you prove in the meantime is proved in the module's scope**, because parking
+leaves the module's imports, rule bases and concealment exactly as they were. The same
+fact is why **a second `import` is refused while one is parked**, which is the section
+after next.
+
+**A `yield` while the import is parked says *nothing has yielded*.** Yielding is about
+the program in front of you, and parking moved that program into the parked quest. For
+the same reason you cannot `yield` out of the lemma: it is a different program.
+
+### One import at a time, parked or in flight
+
+*Decided 2026-11-11, built MS12 phase 310; kept as it stands 2026-11-12.*
+
+**While an import is parked you cannot import anything else.** Not a second file, and
+not the module that holds the lemma you parked in order to prove. The refusal names
+the repair:
+
+```
+thena spine> import examples.demo.Demo06Trust
+the import of examples.demo.pending.Demo07Holes is parked
+  — :resume examples.demo.pending.Demo07Holes to carry on with it
+```
+
+**It is forced, not a policy.** A standing import holds the module's rule-base pool,
+its held bases and its scope concealment in the live machine, and there is one set of
+those. Leaving them in force is what makes the lemma provable in the module's own
+scope — the previous section — and a second import would displace all three, so the
+parked import would find someone else's when you picked it up.
+
+**The way out, in the order the refusals ask for it.** Finish the lemma with `qed`, or
+`:suspend` it, or `:abandon` it — a parked import cannot be picked up while a proof is
+on the wheel:
+
+```
+thena spine> :resume examples.demo.pending.Demo07Holes
+t is still being proved — :suspend or :abandon it first
+```
+
+Then `:resume` the import, and then either carry it to its end — fill the hole and
+`yield`, as the previous section shows — or give up the declaration it stopped in:
+
+```
+thena spine> :abandon
+gave up zeroIsValue — the rest of examples.demo.pending.Demo07Holes carries on
+module examples.demo.pending.Demo07Holes
+  zeroIsValue did not go in:
+    you gave it up with :abandon
+```
+
+**`:abandon` gives up the declaration, not the module.** *Decided 2026-11-14.* It is
+that declaration failing, and a module imported at the prompt carries on past a
+declaration that fails: you lose the one you gave up and every declaration that names
+it, and the rest of the file goes in. `Demo07Holes` writes one declaration, so above
+there is no rest.
+
+**It still takes what you declared at the prompt while it stood**, and says which:
+those declarations stand under the elaboration that is going, and leaving them would
+leave a reference dangling — the thing revoking a partial import was refused over, in
+miniature.
+
+**There is no word for giving the whole import up.** Before this decision `:abandon`
+was that word, and it put the session back exactly as it stood — which meant one
+unfinished proof in a file cost you the file.
+
+**What this costs you, stated plainly.** You cannot reach *outward* mid-import. If the
+lemma a module stopped for needs something you have not imported yet, you have to give
+the import up, fetch what you need, and import it again. The alternative — handing the
+pool and the scope back at the park and re-installing them at `:resume` — would allow
+the second import and would mean your lemma was proved in the session's scope rather
+than the module's, which is the thing parking exists to preserve.
 
 ### A file's header must match its path, and it is checked when you import it
 
@@ -1284,7 +1556,7 @@ consult Stlc.Tactics     -- which imports Stlc.Terms, so Stlc.Terms is loaded fi
 ```
 
 **This is the order the engine tries rules in when no name is given** — you at a
-hole, `:matches`, `prove`. **It is also the order a rule called *by name* is tried in,
+hole, `:matches`, `step`. **It is also the order a rule called *by name* is tried in,
 because a rule IS open to extension** — see *A later rule base may refine an earlier
 base's rule* below. This paragraph said the opposite until 2026-11-06, when it was
 measured and was wrong: there may be several clauses of one name, in several bases, and
@@ -1514,9 +1786,335 @@ id {suc 0}            a parse error: a level argument is an atom
 There is no inference of level *arguments* at a use site the way there is for a
 bare `Type`. If a name has level parameters, you write them.
 
+**Inside a rule there is one more atom, `${l}`** — a level a rule was handed,
+spliced into the term it is building. It is the same splice a term position
+takes, at the one other place the grammar wants something, and it is the only
+way to write a term at a level that has no numeral; see *a level in a pattern is
+a numeral or a splice*, below.
+
 `⊔` — the join — is a real part of the level algebra and prints in inferred
 types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
 inference builds a join.
+
+### A rule head says what the focus is, with `at`
+
+*Decided 2026-09-14, built 2026-11-26. `at` is a reserved word from that day,
+and the shipped base is written with it.*
+
+A rule's head is its parameters, then the focus, then its shape tests — and the
+focus is written as a pattern over one of the five pieces a development is built
+from:
+
+```
+rule solve at ? h ≐ _ : s                         :- do prim-solve
+rule shape at ? h : core`∀ (${x} : ${T}) -> ${E}`  :- do say "a universal"
+rule onward at λ x : s                            :- do say "an assumption"
+```
+
+| written | the focus is |
+|---|---|
+| `at ? ‹x› : ‹S›` | a hole nothing has been tried on |
+| `at ? ‹x› ≐ _ : ‹S›` | a hole with a part-built term under it |
+| `at λ ‹x› : ‹S›` | an assumption |
+| `at ‹x› = ‹v› : ‹S›` | a local definition |
+| `at ∀ ‹x› : ‹S›` | a ∀-binder |
+
+**`at` names the subject and a tag names the language.** The pattern after `at`
+is over development components, which are not core terms, and the development
+calculus is built in rather than declared — so there is no fence to write. When
+it becomes a declared language it will gain one, like anything else.
+
+**A clause with no `at` is offered at every focus** — which is every rule that
+is a function.
+
+**`at _` IS ANY COMPONENT.** A lone pattern names no shape: it stands at the
+component's own identity and asks nothing else, so it matches all five. Write it
+when a rule needs the focus to be a component of the chain and does not care
+which — `rename` does, because a word belongs to a binder and all five
+components have one, while a constraint and a position inside a term do not:
+
+```
+rule rename n at _ :- do prim-rename n
+```
+
+**IT REPLACED EVERY HEAD TEST ABOUT THE FOCUS.** `focus-is-hole`,
+`focus-is-guess`, `focus-is-definition` and `focus-is-component` are all gone:
+they are `at ? _ : _`, `at ? _ ≐ _ : _`, `at _ = _ : _` and `at _`, and asking
+the same question two ways is the redundancy this notation exists to remove.
+Every head test that remains asks about a term the clause was handed.
+
+**Why *any component* is a lone pattern and not `at _ : _`**, which would also
+have read as "identity and type, shape unsaid": `_ : _` is `? _ : _` with the
+sigil dropped, so it reads as a hole — the one thing it must not mean. The cost
+of the lone pattern is that a rule wanting the focus's type without saying which
+form it is writes five clauses, or asks `goal`.
+
+**Each position is an ordinary pattern, so a bare word binds there.** `at ? h :
+s` binds the hole's name and its type; a `` core`…` `` region at the type
+position names the parts of the goal. This is the opposite of the rule inside a
+region, where a bare word names a global — inside a fence the text is another
+language's and needs an escape, and after `at` it is still `instral`.
+
+**What is under a guess is written `_`, and cannot be bound.** A part-built term
+is a development rather than a term, and `instral` has no value for a
+development; a body reads it with `goal`.
+
+**`at` is a reserved word, project-wide.** A notation needs a token: the
+definition form begins with a name, so without the keyword `rule r at x = v : S`
+could not be told from a rule of two parameters. Nothing else may be named `at`
+in any of the four languages — a word that merely contains it, like
+`universe-at`, is untouched.
+
+### A pattern over a core term is a tagged region, and only `${…}` binds
+
+*Decided 2026-11-25. Built, binders included.*
+
+A rule takes a core term apart with a pattern, the same way it matches a surface
+term or a term of a language you declared — there is no separate notation for
+it. The language is named by the tag and the pattern is written in backticks:
+
+```
+core`∀ (${x} : ${T}) -> ${E}`
+core`trusted ${c} ${a} ${b}`
+```
+
+**The tag is written even where nothing else could stand there.** One notation
+with two spellings costs more than the two characters it saves.
+
+**A bare word matches as written and names a global.** Only `${…}` binds, so
+`core`Nat`` matches `Nat` and nothing else, and there is no position where a
+plain word quietly becomes a variable. A word that names nothing is refused when
+the file is read, not when the clause is tried.
+
+**A binder's name is a position that binds, so it takes a splice and a written
+word is refused.** `core`∀ (x : ${T}) -> ${E}`` does not read. There is nothing
+it could mean: a bare word inside a region names a global, which a binder's name
+is not, and a binder's word carries no meaning in a core term — two terms that
+differ only in a binder's word are the same term — so there would be nothing for
+a written one to compare against. The mirror holds at a position that *refers*,
+like an `elim`'s datatype, where a word is written and a splice is refused.
+
+**`_` is the wildcard inside a region too**, at a binder and at a term alike:
+`core`∀ (${_} : ${S}) -> ${E}`` matches a universal and names only its parts.
+
+**Several binders in one group are several patterns.**
+`core`∀ (${x} : ${S}) (${y} : ${T}) -> ${E}`` nests exactly as the term does,
+because each `∀` binds one thing.
+
+**`->` is a binder as much as `∀` is.** `core`${S} -> ${B}`` matches a universal
+whose binder the pattern declines to name — dependent or not, since the body
+sits under the binder either way and has to be opened to be looked at.
+
+**A word with no braces has no level arguments.** `Nat` means `Nat` at no
+levels, exactly as it does when you write it in a term, so a family you use at a
+level is matched by writing that level: `Empty {0}`.
+
+**The body of a binder is a plain splice.** `${E}` is the inside of the `∀`,
+with an ordinary variable standing where the bound occurrences were — you do
+not write the dependence, because the position already says it.
+
+**Matching never changes the proof you are building.** Taking a `∀` apart does
+not introduce its binder: the variable the body refers to is not in scope yet,
+and `intro` is what makes it real. A rule can therefore look at the shape of a
+goal and *then* decide between introducing and doing induction.
+
+**A word your rule read off a term is renumbered where the binder lands, not
+used as written.** `intro` has always treated the two sources of a word
+differently — one you typed is yours, taken or not, and one the system found on
+the goal's own binder is made free so that two live bindings never share a word.
+A word a pattern took off a `∀` is the second kind, whichever way it reaches
+`intro`: matching `∀ (A : Type₀) -> …` where `A` is already bound and introducing
+gives you `A1`, not a second `A` with a shadowing warning. Nothing your rule
+holds breaks, because it refers to the binder by identity and not by word.
+
+### A body goes back under a binder with `make-forall`, `make-lambda` or `make-let`
+
+*Decided and built 2026-11-26.*
+
+Taking a `∀` apart hands your rule the binder's identity, its domain and the
+body with an ordinary variable where the bound occurrences were. Three ops put
+that back together:
+
+```
+g = make-forall x T E        -- ∀ (x : T) -> E
+f = make-lambda x T E        -- λ (x : T) -> E
+l = make-let x v T E         -- let x = v : T in E
+```
+
+**It is the reverse of the pattern, and it is what a rule that does induction
+needs.** A rule that takes a `∀` apart and then introduces the binder calls
+`intro` and the variable becomes real. A rule that does induction on the
+parameter instead never introduces it, and the motive it has to build is exactly
+this re-abstraction — the body abstracted over the variable again.
+
+**The first argument is the binder's identity and not a word**, which is why it
+is what `${x}` binds and not a string: the identity carries the variable the
+pattern opened the scope at, and that variable is the only thing that says which
+occurrences of the body belong to this binder. Two binders may print the same
+word.
+
+```
+rule rebind core`∀ (${x} : ${s}) -> ${e}` at ? _ : _ :-
+  do g = make-forall x s e
+     claim "rebuilt" g
+```
+
+```
+thena spine> :theorem t : Type₀
+proving t : Type₀
+thena spine> rebind core`∀ (A : Type₀) -> A`
+thena spine> :where
+focus
+  let ? t : Type₀ in
+path
+  root ▸ rebuilt
+context
+  rebuilt : ∀ (A : Type₀) -> A
+type
+  Type₀
+```
+
+**A word with no variable in it binds nothing.** `make-forall "B" T E` builds a
+binder over a body that does not mention it, which is what `arrow` builds for a
+domain it has no word for. If `E` came off a pattern the variable in it stays
+loose, and the term is refused where you use it rather than where you build it:
+`claim` says *that is not a type* and names the variable that is not in scope.
+Nothing here type-checks what it builds — a constructed term is checked where it
+is used, which is the line everywhere else in the rule language draws too.
+
+**Three ops and not one with a tag**, because the rule language has nothing to
+pass a tag as, and because a rule writes `∀`, `λ` and `let` as three different
+words anyway. `make-let` takes a fourth argument, the bound value, because a
+`let` node holds one and the body does not.
+
+### A rule names the binder it introduced with `ident-term`, and the base ships one that reads its own goal
+
+*Decided and built 2026-11-26.*
+
+A pattern over a `∀` hands your rule the binder's *identity* — a word and the
+variable the body refers to. `intro x` opens the binder at that very variable
+rather than minting a second one, so after it the parameter is real; and
+`ident-term x` is the term that mentions it.
+
+That is the last piece a rule needed to work from its own goal. Before it, a
+rule with no arguments could ask whether its goal was a universal and then not
+name the parameter, because every op that takes a *term* had nothing to be
+handed. The shipped base's `by-induction` is the whole thing in three lines:
+
+```
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+```
+
+**It is told nothing.** The subject of the case split is the binder its own head
+bound, which is what separates it from `induction-core core`b``, where you name
+the scrutinee in a term you wrote. Being nullary it is a candidate for a bare
+`step` as well, so a search can reach it with nothing written down at all;
+`examples/SearchReadyInduction.thena.script` proves a theorem both ways.
+
+**Where it sits in the base is the economy.** It is below `intro` and above
+`attack`. Introducing is the strictly less committal move — and is this rule's
+own first instruction — so a search takes that first, and once it has, the goal
+is no longer a universal and this clause no longer matches. The case split is
+the next alternative at that choice point, reached by backtracking rather than
+chosen outright.
+
+**A word carrying no variable fails.** `ident-term "a"` has nothing to mean, and
+minting a variable would answer with a term mentioning a binder that is not
+there — so it says that instead. This is the one direction the conversion goes:
+`name-ident n` turns a name into an identity *without* a variable, because a
+rule holding a name means that word, and nothing turns an identity back into a
+name, which would throw the variable away.
+
+### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
+
+*Decided 2026-11-25, and built 2026-11-27 — the splice came a phase later than
+the numeral, because a level position admitted no splice anywhere in the
+language and one production had to serve a pattern and an ordinary term
+literal alike.*
+
+A pattern over a core term writes level arguments in the same braces a use does,
+numerals only as above, and may put a splice in one:
+
+```
+core`Empty {0}`         matches Empty at level 0 and at nothing else
+core`Empty {${_}}`      matches it at any level
+core`Empty {${l}}`      the same, and binds that level as l
+```
+
+Levels are compared by normal form rather than by written shape, so the numeral
+matches every level that normalises to it.
+
+**A splice is the only way to reach a join.** `ℓ ⊔ ℓ'` prints in inferred types
+and cannot be written, here as anywhere else, so no pattern matches one
+literally; `${l}` binds it whole. A rule that holds a level that way can pass it
+on but cannot look inside it: there is no pattern for *is this a successor*, and
+a question about a level's shape is one to ask of the level rather than a shape
+to match.
+
+**And the level you bound is written back the same way**, in a term the rule
+builds rather than matches:
+
+```
+rule by-reflexivity at ? _ : core`Eq {${l}} ${A} ${a} ${b}` :-
+  do t = resolve-core core`refl {${l}} ${A} ${a}`
+     ; fill t
+     ; solve
+```
+
+That clause closes an equation at whatever level it was stated at. Written with
+`{0}` in place of both splices it proves the level-zero case and is stuck one
+level up, which is the whole of what a pinned numeral costs you.
+
+### A pattern over a trusted term sees all three of its parts
+
+`trusted T e` writes two things — the type you claim and the body — and Thena
+works out the third, the type the body actually has. A core term writes all
+three, and **a pattern over one matches all three**:
+
+```
+core`trusted ${claimed} ${actual} ${body}`
+```
+
+The claim and the actual type are what the trust is: a trusted term stops being
+trusted the moment those two agree, which is when the node contracts away. A
+rule that wants to know whether a claim is still carrying weight compares them,
+so neither is hidden from it.
+
+### `intro` takes a binder's identity, and adopts the variable that came with it
+
+*Decided 2026-11-25. Built.*
+
+There is one `intro`. Its one-argument form takes an **`Ident`**: a word, and —
+when a rule got it by taking a binder apart — the variable that binder was opened
+at.
+
+```
+intro "a"           the word a, and a variable minted for it
+```
+
+**A written word means mint.** `intro "a"` is unchanged and so is a bare `intro`:
+there is no variable in a word, so `intro` makes one.
+
+**A variable that came with the word is adopted, not replaced.** A rule that has
+taken a `∀` apart is holding `${E}`, the inside of the binder, which refers to the
+variable the match opened it at. Minting a second one would put a *different*
+binder in the context, printed with the same word, and the term the rule is
+carrying would still refer to the first — two bindings that look identical and are
+not interchangeable.
+
+**`intro` never looks a word up.** Resolution finds a binding that is already
+real, and `resolve-name` is that word. `intro` makes one real; it does not find
+one.
+
+**A string literal stands at an `Ident`**, as it does at a `Name`. A `Name`
+*variable* does not: `name-ident n` is how a rule that holds a name says it means
+that name with no variable — the same explicit conversion `name-text` is in the
+other direction, and for the same reason. Nothing is coerced silently, because
+the thing that would be lost is exactly the variable this decision is about.
 
 ### A reference's level arguments are part of what it is
 
@@ -2230,7 +2828,7 @@ the check protects is the grammar that reads the class. It refuses:
 *Decided 2026-09-19.*
 
 A `language` or `context` block at the margin of a module is read by its own
-reader, not by Thena's lexer, so its notation can use `[`, `λ`, `⌜` or `/`:
+reader, not by Thena's lexer, so its notation can use `[`, `λ`, `▸` or `/`:
 
 ```
 x : Token String
@@ -3016,10 +3614,39 @@ prints it:
 
 ```
 data typing : Ctx -> LC -> Ty -> Type₀ where
-  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
-  T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+  T-var : ∀ {x : String} {T : Ty} {Γ : Ctx} -> extend-in x T Γ -> typing Γ (var x) T
+  T-app : ∀ {Γ : Ctx} {M : LC} {S : Ty} {T : Ty} {N : LC}
             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
 ```
+
+**The metavariables are IMPLICIT and the premises are not, so a derivation does
+not repeat what its own statement says.** *Decided 2026-11-18.* A rule's
+metavariables are determined by the judgment you are proving, and writing them
+again is noise:
+
+```
+idTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
+idTyped = T-abs (T-var extend-here)
+```
+
+Before this they were explicit, and the same proof read
+`T-abs empty "x" base (var "x") base (T-var "x" base (extend empty "x" base)
+(extend-here empty "x" base))` — thirteen arguments, every one of them forced by
+the type on the line above. A generated lookup relation is the same: `extend-here`
+takes none, and `extend-there-extend ne i` takes the inequality and the smaller
+lookup.
+
+**Three things stay explicit, and each for its own reason.** A **premise** is an
+argument you supply, named or not. A **named premise** stays explicit even though
+the quantifier that binds it is written by you — `p1 : Γ ⊢ M : T` is a premise. And
+**a pattern binds every argument**: plicity is a permission not to write something
+at a call, so `case d of { T-abs Γ x S E T d1 -> … }` still names all six. The same
+goes for a term inside `` core`…` ``, which is the kernel's language and has no
+implicit positions at all.
+
+**Writing one anyway is allowed**: `T-var {Γ} …` puts the brace back where you need
+it, and `:show` prints a constructor with its braces so the signature a proof is
+written against is visible.
 
 **Every metavariable is quantified, in the order it first appears**, reading
 the premises and then the conclusion. A metavariable is one a `language` or
@@ -3057,7 +3684,9 @@ order and may range over a derivation:
 ```
 
 There, a metavariable the `∀` does not bind is refused, and so is a name it
-binds twice: the `∀` lists the rule's metavariables, it does not nest. **The notation is
+binds twice: the `∀` lists the rule's metavariables, it does not nest. **The parens
+are how you write it and not what you get**: the generated constructor makes a
+metavariable implicit, and a binder standing at a premise — `d` above — explicit. **The notation is
 installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
 is a type, and `:parse typing …` reads one.
 
@@ -3775,8 +4404,12 @@ links and a variable — a different development, printed identically.
 
 `claim`, `assume`, `define` and `quantify` take the identifier you give them and
 do not rename it, refuse it, or number it. Two components may carry the same
-name; `goto ‹name›` then takes the first, and what is printed is freshened for
-the screen only.
+name, and `goto ‹name›` then takes the first.
+
+**What is printed is no longer freshened for the screen**, which it was until
+2026-11-20: a binder whose word another binder has taken prints marked instead of
+renamed. *A word that reaches nothing is marked, and nothing is renamed behind your
+own back*, below, is that decision.
 
 This is what lets the surface language shadow. `\ x -> \ x -> x` and
 `let x = a in let x = b in x` mean what they mean in any other functional
@@ -3789,6 +4422,91 @@ A tactic that needs a name *nobody* has still asks for one, with `fresh-name`.
 
 ## Tactics and the rule engine
 
+### An operation acts where the cursor stands
+
+*Decided 2026-11-26.*
+
+A tactic is run at a position. `attack` opens a guess at the hole you are
+standing on, `intro` takes a binder off that goal, `solve` accepts the guess you
+are in — and until this was settled, three of them did not quite work that way.
+`intro`, its `let` form and `quantify` took the *focused guess* as their subject
+and walked down inside it, looking for the hole at the end of the body, and put
+their binder wherever that walk stopped. So a rule could read one position and
+change another:
+
+```
+rule intro-pi at ? _ ≐ _ : _ :-
+  do g = goal
+     ; core`∀ (${x} : ${T}) -> ${E}` = g
+     ; call intro x
+```
+
+Run that twice at `∀ (A : Type₀) -> A -> A`. `goal` at a guess answers the
+guess's own type, which is the whole statement and never changes, so the second
+run read `A` off the outer `∀` again — while `intro` acted on the hole at the
+bottom of the body, where the binder waiting to be opened is the arrow's. The
+rule named one quantifier's binder and the system opened another's with the
+word. Nothing ill-typed came out of it — a binder's type is the one the goal
+supplies, and a binder's word decides nothing in a core term — but **the rule
+asked about one thing and the system acted on another, silently**, and no rule
+could be written that did not risk it. The same rule, written `at ? _ : _`,
+now names the second binder off the arrow — the rule above in a file
+of its own, consulted, and nothing else typed:
+
+```
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro-pi
+thena spine> intro-pi
+thena spine> :show
+  let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+    λ (A : Type₀) ->
+    λ (x : A) ->
+▶   let ? id1 : A in
+    id1
+  ) in
+  id
+```
+
+**So the three of them act at the cursor, like everything else.** The position
+they require is a hole standing at the end of a guess body, which is the shape
+McBride's thesis gives for the operations that replace a construction, and an
+operation handed anything else refuses rather than going looking. The root of a
+development is not that shape, and the refusal is load-bearing: a λ put there
+would change the statement being proved.
+
+**`attack` leaves you on the hole it opened**, so the three apply immediately
+after it and nothing is navigated in between:
+
+```
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> :where
+focus
+  let ? id1 : A in
+path
+  root ▸ ≐ id ▸ A ▸ x
+context
+  A : Type₀
+  x : A
+type
+  A
+```
+
+**The hole keeps its name.** The binder goes in above it and its type moves
+under the binder, so the goal that was `id1` after one `intro` is still `id1`
+after two — nothing is minted and renamed behind the proof.
+
+**And they are written `at ? _ : _`, which puts them beside `attack`** in the list
+the engine searches. `attack` applies at every hole and never fails, so the
+order of the base is what keeps them reachable: `intro` is written above
+`attack`, for the same reason `try-in-scope` is — see *the tactics that can
+close a goal are tried before the one that opens it up*.
+
+---
+
 ### A rule's head may ask about what the rule was called with
 
 *Decided 2026-09-03.*
@@ -3799,8 +4517,8 @@ first always won. A test may now take operands, and it is written in
 parentheses:
 
 ```
-rule pick s :- when focus-is-hole (surface-is-name s) do say "a name"
-rule pick s :- when focus-is-hole                     do say "not a name"
+rule pick s at ? _ : _ :- when (surface-is-name s) do say "a name"
+rule pick s at ? _ : _ :-                     do say "not a name"
 ```
 
 ```
@@ -3819,7 +4537,7 @@ same rule a rule body follows.
 
 **A bare word is a test of no operands**, and that is why the brackets are
 there: a head is a run of tests with nothing between them, so
-`when focus-is-hole surface-is-name t` would read as one test applied to two
+`when goal-type-is-pi surface-is-name t` would read as one test applied to two
 words. It is the ambiguity a REPL argument run has, answered the same way.
 
 A head may name **only the rule's own parameters** — it runs before the body, so
@@ -3840,11 +4558,11 @@ already strikes for operands.
 McBride's tactic is now written as the two halves it always had:
 
 ```
-rule fill t :- when focus-is-hole
+rule fill t at ? _ : _ :-
   do n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
-rule unify-refine-core t :- when focus-is-hole do fill t ; solve
+rule unify-refine-core t at ? _ : _ :- do fill t ; solve
 ```
 
 `` fill core`t` `` parks `t` in a `=`-binding, unifies its type with the goal's
@@ -3876,6 +4594,51 @@ Elaboration had been given the directed version already; the tactic had not, and
 the same operation answered differently depending on which one you reached it
 through.
 
+### The match list is one line per rule, with its type
+
+*Decided 2026-11-19.*
+
+`:matches` asks what you could do where you are standing, and it answers with **one
+line per rule**, where a rule is a name together with how many arguments it takes. A
+name written with twenty-two clauses is one line.
+
+```
+thena spine> :matches
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+eliminate-core ‹t› : Core -> ()
+step : ()
+fill ‹t› : Core -> ()
+claim ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+…
+```
+
+**The reason is that nothing you can type picks a clause.** A call chooses one by
+matching your arguments against each clause's patterns in order, and `retry` names a
+choice point and never a clause. So a list with one row per clause was offering a
+choice the language does not have, and offering it most loudly where it helped least:
+`elaborate`'s clauses differ only in which surface node their head asks about, and
+with no term supplied every one of them matched.
+
+**Each argument is a placeholder and the type says what goes there.** A placeholder is
+the name some clause gives that position; where no clause names it, it says what kind
+of thing the position takes — `‹list›`, `‹option›`, `‹pair›`. **The type after the
+colon is always there**: it is the one the file declared if it declared one, and
+otherwise the one inference worked out, so a rule nobody wrote a signature for still
+tells you what it takes.
+
+**`:rules` is the other half and it is still per clause.** It lists what is written in
+each loaded base, and what is written there is clauses — with their patterns as
+written, which is what tells one clause from the next.
+
+**What this does not settle**: whether a rule whose arguments you have not supplied
+belongs in the answer at all. It is listed today. Deciding otherwise means deciding
+when a system should narrow an answer on your behalf, which is a question about the
+interface rather than about the engine.
+
 ### Elaboration is a rule with one clause per surface node
 
 *Decided 2026-09-03.*
@@ -3883,10 +4646,10 @@ through.
 `elaborate` is thirteen clauses, and each says which surface node it is for:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
   do w = surface-name t ; x = resolve-name w ; fill t ; solve
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t) do
 ```
 
 So `:step` through an elaboration shows the clause, not one opaque instruction:
@@ -4623,6 +5386,40 @@ Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Wri
 a shorter proof of the same signature can therefore give you a more general global**
 — worth knowing, and not a thing to work around.
 
+### Backtracking puts the whole machine back, so a value bound before a fork is still bound after one
+
+A rule may ask another rule for a value and keep it, and then go on to do
+something that searches:
+
+```
+rule strategy :-
+  do subject = call the-one-to-induct-on
+     ; call try-each-way
+     ; say (concat "done with: " subject)
+```
+
+`try-each-way` is written in several clauses, so the call to it is a real fork:
+the engine takes the first clause that matches, and if the body fails it comes
+back and takes the next. **When it comes back, `subject` is still bound to what
+the first call answered.** Taking an alternative restores the machine the fork
+found — the development, the developments it was nested inside, the rule bases in
+the pool, and the calls that were outstanding — so the branch that failed leaves
+nothing of itself behind, and the branch that runs is not told anything extra
+either.
+
+**It follows that each instruction in a body runs once**, however much searching
+happens in the middle of it. A fork is not a loop: `call try-each-way` above is
+taken again, and `subject = call the-one-to-induct-on` above it is not.
+
+**Until MS12 the last of those was not restored**, and the shape above was the
+one that broke: the body closed every goal, printed everything it was asked to,
+reached its last instruction, and then the line failed saying nothing had been
+bound to `subject` — and the whole development was rolled back with it. The
+practical consequence was that a rule base could replay a proof it already knew
+but could not *look* for one, because looking means forking and forking happened
+under something. A `do { }` block had the same thing in a quieter form: an
+instruction after a call that had returned could be run a second time.
+
 ### The same lesson, one level on: a search must not be a choice point over the work
 
 `induction t of { … }` elaborates by walking a datatype's constructors against
@@ -4669,14 +5466,14 @@ instructions with no iteration — so a helper peels one binder and calls itself
 on the tail, and the term is its own counter:
 
 ```
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
      ; k2 = prim-lambda x
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
      ; k2 = prim-lambda x
      ; return k2
@@ -4707,7 +5504,7 @@ A clause takes its surface term apart with **moves**, which answer with a
 surface term focused on the part rather than a detached one:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+rule elaborate t at ? _ : _ :- when (surface-is-arrow t)
   do … ; a = arrow-domain t ; call elaborate a
         ; … ; b = arrow-codomain t ; call elaborate b
 ```
@@ -4715,6 +5512,138 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 They do not reuse the cursor's words — `dom` and `cod` already move the
 development's ambient cursor, and one word for two different things is what the
 project rules out.
+
+### A choice point names each alternative by its clause's file and line
+
+`:choices` lists what is running and what is still to try. Each one is printed with
+the file and line its clause is written at:
+
+```
+thena spine> :choices
+4706  any-of (standard.thena.rules:457)   untried: any-of (standard.thena.rules:458)
+```
+
+**The thing the engine picks is a clause, and the name belongs to the rule.** A rule
+may have several clauses, so a fork between two of them — `any-of` above, which has one
+clause for the head of a list and one for its tail — would otherwise print the same word
+twice and tell you nothing about which is which, or about what `retry` is about to run.
+
+**The line is the only label that always works.** You cannot tell two clauses apart by
+their parameters: two clauses may take the same shapes and differ only in a `when`. You
+cannot tell them apart by anything you could type, either, because nothing in the
+language names a clause — `retry` names a choice point and a call picks a clause by
+matching. Where a clause sits in its file is what is left, and it is also what lets you
+go and read it.
+
+The path is the file's name and not the whole path, because a loaded base's path is
+absolute and a transcript carrying it would be a transcript of one machine. A frontend
+is handed the full path, since a pane that offers to open the clause needs it.
+
+**And so is every other place a clause is handed over.** A pane listing a rule's clauses
+gets each one's file and line, and a refusal that is about a clause — a second clause of a
+function that nothing can tell from the first, a name that is both a rule and a function —
+names it by where it is written rather than by counting. A clause is somewhere you can go
+or it is nowhere, and which pane you happen to be looking at does not change that.
+
+A clause's position is where it begins — a `rule` clause at its `rule` keyword, a
+function clause at its name — and that holds however the clause is laid out, so a function
+whose `=` sits on a line of its own still sends you to the line it begins on.
+
+### A rule file's refusal says which line of it to go and fix
+
+Every fault a rule base is refused with carries a path, a line and a column, and they
+are the smallest written thing the fault is about. A mistake inside a body sends you to
+the statement that holds it, not to the clause above it:
+
+```
+rule base crusher where
+
+rule crush at ? _ : _ :- do
+  say "trying"
+  say nonesuch
+```
+
+sends you to line 5, column 3 — where `say nonesuch` begins — and not to line 3 where
+the clause does. A mistake in a signature sends you to the signature, a mistake in a
+`when` or in a parameter list sends you to the clause, and a file that will not lex or
+parse sends you to the token the reader stopped on.
+
+**Where you see it is an interface's choice, and today the two differ.** The place travels
+on the refusal itself, so an interface that draws a refusal as structure — the four-pane one
+— shows it and can make it a click. The terminal REPL prints its refusal as a sentence and
+that sentence still carries the statement's number alone; it is not gaining the place,
+because it is the interface being retired.
+
+**A statement's number inside a rule is not a line and never was.** A refusal also says
+which statement of the rule it is about — *instruction 2* — because that is how you read
+a rule you are looking at; the two travel together and answer different questions. Before
+this, the number was all there was, and *instruction 2* in a file whose rule starts on
+line 40 is not somewhere you can go.
+
+**A statement you did not write belongs to the line that caused it.** `f (g x)` is
+compiled into two statements, the inner call bound in front of the outer one, and both
+are at the line you wrote. The same holds for the bases a `consult … where` block pushes
+and pops around each rule in it.
+
+**Text that is in no file has no place**: a `do` block typed at the prompt, and a block
+written inside a term of a modelled language, which is read on its own so a position in it
+is an offset into the term rather than a line of the file.
+
+**And a refusal about the file as a whole has none either** — a file that does not begin
+`rule base ‹name› where` is not wrong at a point. Two faults about a line that is there to
+go to do not have one yet: a name an `import` clause asks a module for and the module does
+not offer, and a module a rule base imports that nobody read.
+
+### A choice point is made by writing rules, and no instruction mints one
+
+Every choice point in Thena comes from the rule base. A call looks for clauses
+whose head matches, takes one, and keeps the rest; a failure in the body comes
+back and takes the next. `:choices` lists the live ones, nearest first, and
+`retry ‹n›` names one of them.
+
+So there is no instruction meaning *make a choice point here*. The wish for one
+is understandable — you are partway through a rule body, or partway through a
+block typed at the prompt, and you would like to mark the spot so that a later
+failure can come back to it. Two things are worth knowing before reaching for a
+construct that does not exist.
+
+**A choice point with nothing different to offer cannot help you.** Taking an
+alternative restores the machine the fork found, so running the same continuation
+again from the same state fails in the same way. An instruction that minted *n*
+indistinguishable alternatives would be a loop whose every iteration is the first
+one.
+
+**A choice point that does offer something different is a rule base you can
+write**, and nothing has to be added to the language for it. Three clauses with
+one head and no distinguishing test are a generator:
+
+```
+pick : Name
+rule pick :- do return "a"
+rule pick :- do return "b"
+rule pick :- do return "c"
+```
+
+Called from a rule that insists on `"c"`, the engine walks them:
+
+```
+thena spine> want-c
+chose 4686: pick
+backtracking to 4686: pick
+backtracking to 4686: pick
+got c
+```
+
+This is the same reason there is no built-in tactic language: the machinery was
+designed so that control flow goes through rules, and a built-in choice point
+would be a second mechanism for the one thing the rule base already is.
+
+**What is left over is not a choice point at all — it is a place a *person* can
+return to.** A choice point is spent by failure, with nobody asked. An anchor is
+spent by someone deciding to go back and answer differently. Those are two
+mechanisms, and the second one belongs to the session rather than to the engine:
+in the editor's live script mode every line is such a point, so stepping back and
+giving a different answer is already how a proof gets revised.
 
 ### Two ops a rule needs that it cannot write down
 
@@ -4772,7 +5701,7 @@ base of your own:
 
 ```
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
-rule elaborate t :- when focus-is-hole (surface-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
   do w = surface-name t
      ; x = resolve-name w
      ; fill x
@@ -4881,6 +5810,43 @@ above are not.
 The same limit applies to an application whose head is not a name — a β-redex
 like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
 
+### A `let`-bound name may have implicit arguments
+
+*Decided 2026-11-18, built 2026-11-19.* A brace on a `let` binding's type means what
+it means on a top-level signature: callers may leave that argument out, and
+elaboration writes it in.
+
+```
+shortest : String
+shortest = let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"
+```
+
+Before this the brace parsed and meant nothing, so `"z"` went into `A`'s position
+and the line was refused with *String and Type₀ cannot be made equal*.
+
+**Idris 1 does not allow this** — Brady restricts implicit binders to the prenex of
+a top-level declaration — and we do not adopt the restriction. A `let` binds a
+name, and everything the mechanism needs is a name to hang the permission on.
+Writing the argument anyway, `f {String} "z"`, still works, and so does a bare
+`f` whose implicit the goal determines.
+
+**A local's braces are its own.** The permission is recorded against the
+*binding*, not against the word, so a `let`-bound `f` neither inherits the braces
+of a global `f` nor loses its own to one, and of two nested `let`s of one word only
+the one you wrote the brace on has it.
+
+**A brace still reaches nothing where no name is bound** — on a λ's binder, or
+inside the type of a higher-order argument:
+
+```
+hof : (∀ {A : Type₀} -> A -> A) -> String
+hof = \ f -> f String "z"       -- accepted: the brace on f's type means nothing
+```
+
+That is not a local-versus-global matter. Plicity is not part of a type in Thena
+— `∀ {A : Type₀} -> A -> A` and `∀ (A : Type₀) -> A -> A` are the same type — so
+a brace can only ever be a fact about something that has a name.
+
 ### `instral` has types, and a name is not a string
 
 *Decided 2026-09-12.*
@@ -4924,7 +5890,7 @@ already gets. Nothing is annotated; a rule's signature comes from its head
 predicates and from the ops its body uses.
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-name t) do …
+rule elaborate t at ? _ : _ :- when (surface-is-name t) do …
 ```
 
 `surface-is-name` is what makes `t` a `Surface`, so `elaborate : Surface -> ()`.
@@ -4947,7 +5913,7 @@ or to a name at an arity it does not have, is a type error:
 
 ```
 rule go :- do helper 1 2
-rule helper x :- do prim-prove
+rule helper x :- do prim-step
 ```
 ```
 the rules do not type check:
@@ -4979,7 +5945,7 @@ shout x = twice (twice x)
 **A function is a rule with one clause and no head**, and that is not an analogy
 — it becomes one. Call it from a rule body by name, exactly as you call a rule.
 The one difference you can see: a function is **not offered as a tactic**, so it
-never appears in `:matches` and `prove` never runs it.
+never appears in `:matches` and `step` never runs it.
 
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
@@ -5187,7 +6153,7 @@ rule file says where a declaration stops by indentation:
 
 ```
 rule f :- do say "hi"
-     ; prove              -- indented: still part of the rule above
+     ; step              -- indented: still part of the rule above
 g x = concat x x          -- column 1: a new declaration
 ```
 
@@ -5230,8 +6196,8 @@ too. It is an ordinary identifier again.
 
 ```
 spine-arguments : Core -> Core -> Surface -> ()
-rule spine-arguments h f t :- when focus-is-component (surface-is-app t) do …
-rule spine-arguments h f t :- when focus-is-component (surface-is-name t) do …
+rule spine-arguments h f t at _ :- when (surface-is-app t) do …
+rule spine-arguments h f t at _ :- when (surface-is-name t) do …
 ```
 
 **The arity is the arrow chain's.** That signature is about `spine-arguments` at
@@ -5283,6 +6249,42 @@ name. `goto` there needs a `do` block with something bound in it.
 
 ---
 
+### Every goal is bound at the prompt, so `goto ‹its name›` reaches it
+
+*Decided 2026-11-19. Changes what you type to move around a proof.*
+
+A typed line is read as a rule body, so a bare word in an argument position is a
+*reference* to something bound — which is why reaching a hole used to mean
+writing its name as a string, `goto-named "id1"`. The session now binds every
+goal before it reads your line: a goal is a hole or a guess, and each one is
+bound, under the identifier the development prints it by, to the variable that
+reaches that position.
+
+```
+❯ :theorem id : ∀ (T : Type) -> T -> T
+❯ attack ; intro ; intro
+❯ goto id1             -- the inner hole
+❯ goto id              -- the guess at the root
+```
+
+**Nothing about the language changed.** A bare word is still a reference and
+still means nothing else anywhere; what changed is that the prompt's scope is no
+longer empty. A rule file is loaded with no session in hand, so a misspelled
+reference in a rule body is still refused when the base loads — the names exist
+only in a line you type.
+
+**It is the variable and not the name, and that is the point.** `goto-named`
+searches from the root for a component of that name. Names are unique in a
+development, but the name a nested position *asks* for is not always the name it
+gets, so a search inside a nested split can land on the enclosing position. The
+variable names one position and cannot. `goto-named` stays for the case where
+what you have really is only a name.
+
+**Goals and guesses only.** Hypotheses and solved positions are not bound: the
+first bind a value rather than something left to prove, and the second is
+finished. `goto-named` still finds a solved position, which is the one place the
+two words differ in what they can reach.
+
 ### `goto-root` goes to the top, and it is the one move that cannot fail
 
 *Decided 2026-09-27. Adds a word.*
@@ -5303,6 +6305,50 @@ always succeeds, including when you are at the root already.
 that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
+
+### `next` works out the goal to go to, and Thena keeps no list of open goals
+
+*Decided 2026-11-23. Adds a word.*
+
+The fourth member of the `goto` family, and the one that is handed nothing: the
+development already says what is unfinished and in what order, so there is
+nothing to tell it.
+
+```
+step                 -- closes this goal
+next                  -- and on to the next one, whatever and wherever it is
+```
+
+**`next` means: the first unfinished goal in the innermost piece of work that
+still has one.** A piece of work is a guess body — what `attack` opens — and the
+outermost one is the development itself. So while the part you are working on
+still has a goal inside it, `next` goes there and nowhere else; when that part is
+finished it widens, and what it then reaches is usually the guess enclosing you.
+
+**A goal counts only when nothing is open inside it.** The root of a proof under
+way is itself a guess, and it stays one until the end, so "the first goal in the
+development" would name the root for ever. `solve` refuses a guess whose body is
+not yet pure, so a guess with work inside it is not something anyone can act on;
+only its innermost descendants are.
+
+**Most proof assistants keep an ordered list of open goals in their state. Thena
+does not, and that is the decision.** Coq keeps `comb` beside its evar map and
+Lean a `List MVarId` beside its metavariable context, because in both the store
+the holes live in is an unordered map, so the order has to be recorded
+separately — and kept in step, which is what Lean's `pruneSolvedGoals` is for.
+Thena's development is an ordered chain, so the order is already there to be
+read. The closest precedent is Isabelle, where the subgoals *are* the proof
+state's premises and there is no list beside them either.
+
+**What it buys.** A tactic that claims a hole for an argument names that hole
+itself, so until now a proof needed a `goto` typed by hand between the tactics,
+naming something no rule base could have contained. `next` needs no name, so a
+strategy written in the rule language can walk the goals. It refuses, saying
+*there is no goal left to go to*, exactly when the development is finished.
+
+**What it gives up, deliberately.** There is no queue, so nothing reorders the
+search and no rule can set a goal aside and come back to it — Idris 1's `UNFOCUS`
+and Coq's shelf have no equivalent. Moving away from a goal by hand is `goto`.
 
 ### Every datatype generates `caseD` as well as `elimD`
 
@@ -5413,9 +6459,254 @@ elimination that stated them is the only thing that knows.
 
 ---
 
+### A rule can read the context, so a search can find its own hypotheses
+
+*Decided 2026-11-22.*
+
+Until now a rule could only use a hypothesis that somebody had named for it.
+`try-core` wants an explicit term, `induction-core` and `case-core` take their
+target as an operand, and a `use`-shaped rule still needed its caller to resolve
+the hypothesis first. Nothing listed what was in scope, so no automated proof
+could discover its own candidates: every one of them bottomed out at a name the
+author had written down.
+
+**`in-scope` is the read.** It takes no operands, answers the entries at the
+focus as a list of terms, and is total — an empty context answers the empty
+list.
+
+```
+thena spine> try-in-scope
+```
+
+**The search is not a second mechanism, and that is the point.** A choice
+point's untried alternatives are rules, and backtracking enters a rule body, so
+an operation cannot offer alternatives. A *rule* with two clauses can, and that
+is enough:
+
+```
+any-of : List a -> a
+rule any-of [x, ..._] :- do return x
+rule any-of [_, ...xs] :- do r = any-of xs ; return r
+```
+
+Both clauses match, so the call builds a choice point: the first answers the head
+of the list, and a failure anywhere after the call comes back for the tail. This
+is Prolog's `member`, written in the rule language with nothing added to the
+engine. **It is a rule and not a function for exactly that reason** — a
+function's matching clauses are cut to the first, so written as one it would
+answer the head of the list and never the rest.
+
+`try-in-scope` is the two put together, and it is the first rule in the shipped
+base that can close a goal without being handed the answer:
+
+```
+try-in-scope : ()
+rule try-in-scope at ? _ : _ :-
+  do hs = in-scope
+     ; h = any-of hs
+     ; prim-try h
+```
+
+**Each entry arrives as a variable, not as a name.** That is shorter — there is
+nothing to resolve — and it reaches more: a name is resolved by looking for an
+entry whose written word you could have typed, and a generalised copy that a
+`case` or `induction` split introduced has no such word. Handing the variable
+over does not have to ask.
+
+**Innermost first.** At `∀ (A : Type₀) (B : Type₀) -> A -> B -> B` the goal `B`
+sees `A`, `B`, `x : A` and `x1 : B`, and the first candidate offered is `x1`,
+which fits — so the proof closes with no backtracking at all. Outermost first
+would have failed three times to reach the same term. A strategy that wants the
+other order reverses the list with `reverse-onto`.
+
+**A bare `step` reaches it, and it is the first thing `step` tries.** That was
+decided a day later and is the next section.
+
+---
+
+### The tactics that can close a goal are tried before the one that opens it up
+
+*Decided 2026-11-23.*
+
+`try-in-scope` shipped below `attack` in the standard base, and a bare `step`
+could not reach it. `attack` applies at every hole and always succeeds, so at a
+goal that a hypothesis closes outright, `step` went
+
+```
+thena spine> step
+chose 4708: attack
+thena spine> step
+chose 4710: solve
+backtracking to 4710: regret
+thena spine> step
+chose 4711: attack
+```
+
+— and on, for as long as you kept typing, with `try-in-scope` sitting in
+`:choices` as an untried alternative at every one of those forks. It was never
+reached, because reaching it needs everything above it to fail and `attack`
+cannot fail.
+
+**So `try-in-scope` is now the first rule in the base, and `attack` follows it.**
+Trying to finish is the cheap guess: at a goal where nothing in scope fits, it
+fails at once and costs one `backtracking to` line. At the same goal as above it
+closes the proof:
+
+```
+thena spine> step
+chose 4708: try-in-scope
+chose 4709: any-of
+```
+
+**`fit-in-scope` is beside it, for a hypothesis that has to be applied to
+something**, and below it because it opens a hole per argument where the bare
+guess opens none:
+
+```
+fit-in-scope : ()
+rule fit-in-scope at ? _ : _ :-
+  do hs = in-scope
+     ; h = any-of hs
+     ; n0 = next-argument-name h
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
+     ; f = apply-next h n
+     ; call fit-core f
+```
+
+It starts at one argument rather than nought, so it does not repeat the rule
+above it; `fit-core` then searches the arity, and `apply-next` refuses a
+candidate whose type is not a function, so a hypothesis that cannot be applied
+costs one step. Together the two prove modus ponens with `step` as the only
+tactic typed:
+
+```
+thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+thena spine> step 5            -- attack, and four intros
+thena spine> step
+chose 4623: try-in-scope
+…
+backtracking to 4623: fit-in-scope
+chose 4628: any-of
+chose 4630: fit-core
+already equal
+thena spine> next              -- the ? a : A that fit-in-scope opened
+thena spine> step              -- closes it with x
+```
+
+**What this is not is a search strategy.** Rule order is global, and which rule
+you want depends on the goal: at `Even (succ (succ zero))` you want the rule
+that refines, and at `A -> A` with the hypothesis to hand you want the rule that
+finishes. One order cannot be both, and ordering the base is the only control
+over the search that exists today.
+
+**And the `next` above is typed by hand because nothing focuses the next goal
+between steps.** It used to be three `goto`s, two of them naming holes the
+machine had minted, which no rule base could have contained; since every
+operation acts where the cursor stands, the only move left is the one from a
+goal that is finished to the one the search opened on the way. **`step` does not
+make it** — a rule that moved the cursor on its own would be deciding the order
+goals are worked in, which is the search strategy this entry says the base does
+not have. That is the limit on automatic proof, not the order of the rules.
+
 ---
 
 ## The REPL and the session
+
+### One move is `step`, and nothing ships under the word `prove`
+
+*Decided 2026-11-24.*
+
+`step` asks the rule base what applies where you are standing and runs one of
+the rules it offers. It was called `prove` until this decision, and the word was
+misleading: one dispatch is one move, and a goal usually takes many.
+
+```
+thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+proving mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+thena spine> step    -- ×5: attack, and four intros
+thena spine> step
+chose 14: fit-in-scope
+```
+
+**No rule is shipped under the word `prove`.** A base is free to define one, and
+that is the point of keeping the word free: `rule prove :- do search` says what
+proving means in a development, and the system has no opinion about it. Typed
+with nothing defining it, `prove` answers *no rule is called prove*.
+
+**`search` is reserved for running to a finish** — a bounded, backtracking
+search that either closes the goal or fails — and it is not built yet. The two
+words are kept apart deliberately: `step` is what you type to watch a proof
+being made, and the thing that finishes one on its own is not a step.
+
+**The operation underneath is `prim-step`.** As everywhere else in the base, the
+plain word belongs to the rule and the `prim-` word to the operation it is
+written over.
+
+**`step ‹n›` makes n moves**, and the arity picks the clause, so a bare `step` is
+unchanged:
+
+```
+thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
+proving t : ∀ (A : Type₀) -> A -> A
+thena spine> step 3
+chose 4730: try-in-scope
+backtracking to 4730: fit-in-scope
+backtracking to 4730: attack
+chose 4732: intro
+chose 4735: intro
+```
+
+A move that fails fails the whole count, and the backtracking is the engine's own
+as it is everywhere else. **It is not a brake**: a rule that calls itself without
+a count still does not terminate, and `step ‹n›` says nothing about that.
+
+**It is two clauses, counting down in the rule language.** `step 0` matches the
+literal and does nothing; `step n` makes one move and calls itself with `n - 1`.
+The two are disjoint — a literal pattern against `number-is-positive` — so there
+is no choice point between them, and a negative count matches neither, which
+answers *no rule matches* rather than quietly doing nothing. The whole of the
+arithmetic this needed is one operation, `one-less`.
+
+**`step ‹n›` and `:step ‹n›` are different things and the words collide.**
+`:step 120` lets every typed line run at most 120 *instructions* — a debugging
+cap on the machine — where `step 5` makes five *moves*. The collision was weighed
+and taken deliberately; if it costs anything, the cap is what gets renamed.
+
+
+### The prompt completes the acts a file writes, and not only the colon commands
+
+*Decided 2026-11-12.*
+
+`open`, `declare`, `import`, `consult` and `data` are spelled without a colon because
+they act and because they are the words a file writes. They are the driver's own words
+rather than rules in a base, so the completion had never heard of them: a half-typed
+`cons` offered four ops whose spelling begins the same way and not `consult`.
+
+**A line typed at the prompt may be a statement or one of those acts, and both are
+offered** — until the word is finished nobody knows which it is.
+
+**`open`'s argument is the namespaces that are in scope.** No namespace it offers is
+refused when it is taken: the offer asks the act's own resolution question rather than
+a second one, so a namespace that exists but is ambiguous from where you stand is not
+listed. The spellings offered are the full dotted paths; `open A` in force also makes a
+written `Ty` reach `A.Ty`, and those shortened forms are accepted but not offered.
+
+**`import`'s and `consult`'s arguments are not offered**, because the module names that
+could be imported are a question about the disc rather than about the session.
+
+### An argument that is a name is read with the spaces off both ends
+
+*Decided 2026-11-11.*
+
+`open Nat `, `:show Nat ` and `import A.B ` name what the unspaced lines name. A
+trailing space is invisible in an editor and survives in a saved
+`.thena.script`, so without this a line could silently do nothing and take every
+line below it out of scope with nothing on screen to say why.
+
+**An argument that is a path is not reshaped** — it is split on spaces instead —
+and one that is a term or a statement goes to the parser, which has its own
+answer about whitespace.
 
 ### There are three kinds of file, and the extension says which
 
@@ -5426,6 +6717,15 @@ elimination that stated them is the only thing that knows.
 | `.thena` | a **proof module** — the surface language: a header, then declarations |
 | `.thena.script` | a script of REPL command lines, run in order |
 | `.thena.rules` | a rule base |
+
+**Why the second word rather than a plain `.rules` and `.script`.** Reconsidered
+2026-11-18 and kept. The shared `.thena` is not a composition, the way a literate
+`.agda.md` is markdown that contains Agda; it is a family marker, and that is
+what it buys: `*.thena*` matches every file of this project's and nothing else,
+so one glob configures an editor, a `.gitattributes` or a search. `.rules` and
+`.script` are words general enough that a rule written for them would claim other
+tools' files too. A Core term written to disk, if that ever exists, takes
+`.thena.core` by the same rule.
 
 `:load ‹path›` reads the extension. `:load proof ‹path›`, `:load script ‹path›`
 and `:load rules ‹path›…` say it out loud instead, and the keyword wins over the
@@ -5540,7 +6840,7 @@ written in. Two places take one, and they are the same syntax in two roles:
 
 ```
 -- an expression: elaborating it means playing it
-foo = do { attack ; prove }
+foo = do { attack ; step }
 
 -- an item: it plays where the declarations around it declare
 do
@@ -5551,7 +6851,7 @@ It lays out like everything else, and it is an **atom**, so an argument run
 takes one without parentheses: `try do { attack }`.
 
 **This is why there is no surface term meaning *no proof given, search for one*.**
-You write `do { prove }`, and a search strategy is then a rule name rather than
+You write `do { step }`, and a search strategy is then a rule name rather than
 syntax — `do { auto }` names a rule you wrote, and the system knows nothing
 about it.
 
@@ -5679,7 +6979,7 @@ A mistake inside a lambda names the line the lambda is on.
 A rule body can stop and hand control to you:
 
 ```
-elaborate (do { h = here ; yield "look at this" ; goto h ; prove })
+elaborate (do { h = here ; yield "look at this" ; goto h ; step })
    look at this
    (yield to hand control back)
 ```
@@ -5803,7 +7103,7 @@ nothing — `prim-solve`, `prim-try`, `say` — so a rule that wanted to return 
 have had to be written to end on the producing op. The return value would then be
 a constraint on the order of the body, and invisible where the rule is called.
 
-`prove` is not a call and returns nothing: what the rule it chose did is in the
+`step` is not a call and returns nothing: what the rule it chose did is in the
 development.
 
 ### An argument may itself be a call
@@ -5882,7 +7182,7 @@ A rule file is one layout block and a rule body is a block that `do` opens, so
 a body can be written as indented lines with no separators at all:
 
 ```
-rule demo :- when focus-is-hole do
+rule demo at ? _ : _ :- do
   m = shout "hi"
   say m
 ```
@@ -5891,7 +7191,7 @@ rule demo :- when focus-is-hole do
 leading-`;` style the shipped base is written in:
 
 ```
-rule fill t :- when focus-is-hole
+rule fill t at ? _ : _ :-
   do n = fresh-name "refined"
      ; x = define n t
 ```
@@ -6062,7 +7362,7 @@ that is what makes a tactic a search. **It stops at the line you typed.** A
 choice point an earlier line left is not reached implicitly:
 
 ```
-thena spine> prove
+thena spine> step
 chose 685: attack
 thena spine> regret                 -- take the guess back off
 thena spine> back                   -- at the root: nothing to pop
@@ -6070,7 +7370,7 @@ stuck: already at the root
   undoing that would backtrack to 685, which was chosen before this line — retry 685 to take it
 ```
 
-Before this, `back` would have taken `prove`'s untried alternatives and put the
+Before this, `back` would have taken `step`'s untried alternatives and put the
 guess back — **undoing the `regret` you had just typed, with a navigation
 command.**
 
@@ -6091,10 +7391,10 @@ through to the next one inside that command.
 worth understanding, because it is the one that bites hardest:
 
 ```
-rule pause :- do prove ; yield "over to you" ; say "rule resumed"
+rule pause :- do step ; yield "over to you" ; say "rule resumed"
 ```
 
-`prove` leaves a choice point, then the rule hands you the prompt. If a command
+`step` leaves a choice point, then the rule hands you the prompt. If a command
 you type there fell past that choice point, **control would be taken back from
 you** — the rest of your line discarded, your bindings replaced, and the rule
 re-entered on another alternative. And because the choice point was made *inside*
@@ -6136,14 +7436,18 @@ thena spine> apply-core core`succ`              -- saturates, lands on Nat
 stuck: Nat and Nat -> Nat cannot be made equal
 ```
 
-**It is two clauses of a rule and nothing else** — no loop, no new operation:
+**It is two clauses of a rule and nothing else** — no loop, and nothing in it searches but the engine:
 
 ```
-rule fit-core f :- when focus-is-hole
+rule fit-core f at ? _ : _ :-
   do fill f ; solve
 
-rule fit-core f :- when focus-is-hole
-  do n = fresh-name "a" ; f2 = apply-next f n ; call fit-core f2
+rule fit-core f at ? _ : _ :-
+  do n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
+     ; f2 = apply-next f n
+     ; call fit-core f2
 ```
 
 Nothing sequences them. Both heads pass, so the engine builds a choice point,
@@ -6337,7 +7641,7 @@ names with several types.
 *Decided 2026-09-14; it was `then` until then.*
 
 ```
-rule attack :- when focus-is-hole do prim-attack
+rule attack at ? _ : _ :- do prim-attack
 ```
 
 Two reasons: `:-` is Prolog's neck, so `:- then` read as *then then*; and a block
@@ -6417,6 +7721,289 @@ alternative is a message that names neither.
 **It never prints a definition's body.** The collapse fires only where the
 definiens is a bare variable, so it replaces one name with another name.
 
+### An argument the statement did not name gets a real name, and `intro` can say what it is
+
+*Decided 2026-11-20.*
+
+A statement may name none of its arguments. `proj₁ : ∀ (T : Type) -> T -> T -> T`
+names `T` and nothing else, so `intro` used to introduce two bindings with no name
+to give them. They were shown as `_` and `_1`, and the digit was added by the
+printer so that two of them could be told apart on screen.
+
+**That display could not be written back.** Only `_` resolved, and because a name
+lookup takes the innermost binding it reached the *second* argument — so a `fill`
+of `_`, meaning the first, silently built the second projection, and with both
+arguments at one type nothing refused it.
+
+**An argument with no written name is now given one where it enters the context**:
+`x`, then `x1`, `x2` for each further one, skipping any word already in scope. The
+word the development shows is the word that resolves, and a context never holds two
+bindings sharing a word the author did not write.
+
+```
+:theorem proj₁ : ∀ (T : Type) -> T -> T -> T
+attack ; intro ; intro ; intro
+goto proj₁1
+:where
+  context
+    T : Type₀
+    x : T
+    x1 : T
+fill core`x`     -- the first argument, as shown
+```
+
+**`intro` also takes the name outright**, which is how to avoid the invented one:
+
+```
+intro "a"
+intro "b"
+```
+
+It is a second arity of the same rule, so `intro` with no argument is unchanged.
+
+**A name you wrote twice yourself is untouched.** Writing `intro "a"` twice is
+shadowing, the inner binding wins, and that is what shadowing means everywhere
+else; this decision only supplies a name where none was written.
+
+### A word the system takes off a type is made free where the binder lands
+
+*Decided 2026-11-20.*
+
+`intro` with no argument takes the binder's word from the type it is introducing.
+That word was written in a statement or a declaration, and it is a **hint copied
+out of a closed term** rather than a name you asked for here — so where it is
+already taken, it is numbered until it is free.
+
+```
+:theorem twice : ∀ (x : Type₀) -> ∀ (x : Type₀) -> x
+attack ; intro ; intro
+  context
+    x : Type₀
+    x1 : Type₀
+:infer x1     -- the second binder, as shown
+:infer x      -- the first, also as shown
+```
+
+**Both words answer, which they did not before.** The second binding was stored
+under the word `x` and *displayed* as `x1`, the printer numbering a repeat on the
+way out: `x1` was in no scope, and `x` reached the inner binding while the screen
+said `x` on the outer one.
+
+**The binders of a split's method are the same case once you stand in one.**
+They carry the words the datatype's own declaration wrote, so attacking a method
+of `Below` inside a theorem that has an `m` of its own introduces `m1`, and
+`fill core`m1`` reaches it. **The method's *statement* keeps the declaration's
+own word**, because that word is right where it stands — see *A word that reaches
+nothing is marked* below for what the statement then shows about the theorem's
+own `m`.
+
+**A word you type is still yours, taken or not.** `intro "a"` twice is shadowing
+and the inner binding wins, as in any other language; so is a surface `\ x -> \ x
+-> x`, where the words are the ones you wrote. This decision reaches only the
+words the system supplies for you.
+
+**A term Thena *generates* obeys this throughout, and that is where it shows.**
+Every eliminator, case wrapper and lemma a `data` declaration brings with it is
+written by the system from end to end, so every binder in one is given a word that
+is free where it stands. The words were minted blind until MS12 and the printer
+hid it:
+
+```
+-- before
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x : Ladder x) (x' : Nat) (x' : Ladder x')
+                               (q : Eq {0} Nat x† x'†) -> …
+-- now
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x')
+                               (q : Eq {0} Nat x x') -> …
+```
+
+**So a generated lemma carries no marks** — a mark means a word reaches nothing,
+and nothing the system writes for you should be unreachable.
+
+**A term a tactic builds obeys it too**, which is where you are most likely to
+read one: the motive of the elimination `induction` writes, and every binder the
+machinery underneath it needs. The words there come from the datatype's own
+declaration, and they used to be copied in blind:
+
+```
+-- before, in a theorem whose own arguments are called x and target
+elim Vec {0} (N) (λ (_ : N) (target : Vec {0} N _) -> N) … (x) target
+-- now
+elim Vec {0} (N) (λ (x1 : N) (target1 : Vec {0} N x1) -> N) … (x) target
+```
+
+Two things changed in that line. The motive's first binder stands for `Vec`'s
+index, which the declaration left unnamed, so it was shown as `_` and now gets a
+word like any other unnamed argument; and `target` is numbered because the
+theorem has a `target` of its own two lines above it. **One word now means one
+thing in a term you are reading**, so a word you type inside a motive reaches
+what the screen says it reaches.
+
+**Where you still meet a mark is a word a tactic re-binds on purpose**: a split's
+method, above, and the arm of an induction, which re-binds the target under the
+word you gave it.
+
+### An argument you did not write keeps the name the declaration gave it
+
+*Decided 2026-11-24.*
+
+A signature may mark an argument implicit, and then nobody writes it: the system
+claims a hole for the position and unification settles it. **That hole is shown
+under the word the declaration wrote**, not under one the elaborator invented.
+
+```
+thena spine> :show S-refl
+S-refl : ∀ {M : LC} -> steps`${M} -->* ${M}`
+thena spine> :infer S-refl
+S-refl : ∀ {M : LC} -> steps`${M} -->* ${M}`
+```
+
+The second line used to read `∀ {a : LC} -> …`, so the one position the author
+calls `M` had two names depending on which command you asked. It shows up
+wherever an inserted argument is still undetermined — `:infer`, `:dev`, `:show`
+of a definition that was elaborated — and the words were `a`, `a1`, `a2` in the
+order the holes were claimed.
+
+**The word is a request, not a guarantee.** It is freshened where it lands, like
+every other word the system supplies: a judgment whose metavariable is `X`, used
+where an `X` is already bound, gives `X1`. See *A word the system takes off a
+type is made free where the binder lands* above — this is the same rule one
+place further out.
+
+**Where the declaration named nothing, the tactic's own word is used.** An
+anonymous domain has no word to copy, and `_` is not a name you can write, so the
+rule that claims the argument supplies one as it always did.
+
+
+### A word that reaches nothing is marked, and nothing is renamed behind your back
+
+*Decided 2026-11-20.*
+
+**Thena prints the word a binder really carries.** It used to rename a repeated
+word on the way out — a second `x` was shown as `x1` — and nothing read that back,
+so the screen offered a handle that was not one: `x1` was in no scope and `x`
+reached the *inner* binding while the screen put `x` on the outer.
+
+**Shadowing is allowed, and it kills the outer binder.** The moment a word is
+written twice, no word reaches the outer one. It is still shown, and so is every
+reference to it, with a mark saying that the word printed there reaches nothing —
+a dagger at the prompt, and a flag a frontend styles as it likes:
+
+```
+λ (x : Type₀) (x : Type₀) -> x†      -- the body means the OUTER binder
+λ (x : Type₀) (x : Type₀) -> x       -- the body means the inner one
+```
+
+**The two terms are different and now look different.** They are what a printer
+that renamed could not tell you apart, and the second is the one you can write
+down: a reference to a dead binder cannot be typed, so it only ever arises where
+Thena builds a term for you. A split's method is where you will meet it —
+eliminating `b : Below (succ m) (fz m)` in a theorem with its own `m`, the method
+reads
+
+```
+∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> …
+```
+
+and the mark is what tells you the two `succ m`s are not the same `m`. Printed
+without it the equation would read as trivially true.
+
+**The cost, and it is accepted.** Printing is no longer the inverse of reading
+for a term that still mentions a dead binder, and only for such a term: a mark is
+not something you can type. **The repair is yours rather than the printer's** —
+renaming the binder gives it a free word for real, in the term, and everything
+pointing at it follows.
+
+**Why not forbid the shadowing instead.** A file may legitimately contain
+`λ x. λ x. x`, so a refusal could only live where you introduce a binder
+interactively, and elaborating such a file would then have to rename for real —
+which means the words in your development would not be the words in your file.
+Lean 4 carries the same split and closes the same gap the same way.
+
+### A word Thena mints for you is always a word you can type
+
+*Decided 2026-11-27.*
+
+**A binder Thena names itself gets a word that is free in scope and a word the
+language has not reserved.** The first half was always true; the second was not,
+and the two are the same requirement — a word is only a handle if typing it where
+it is printed reaches the binder, and a keyword typed there is not a name at all.
+
+The eliminator for an equation binds the value a transport carries. Had that
+binder kept the word it was first given, reserving `at` would have made its own
+method unreadable:
+
+```
+λ (same : Nat) (at : Fin same) -> at        -- the lexer refuses this line
+λ (same : Nat) (at1 : Fin same) -> at1      -- what Thena prints instead
+```
+
+**It applies only to words Thena mints.** A word *you* write is used as given —
+*a name you write is the name you get*, above — and a keyword was never one you
+could write, the parser having refused it.
+
+### You are told when a word you write kills a binder, and `rename` is the way back
+
+*Decided 2026-11-20.*
+
+**A line that takes a word an outer binder of the same chain carried warns.** The
+line still runs — shadowing is allowed — and the warning says what the word cost
+and the one act that undoes it:
+
+```
+:theorem plainer : ∀ (a : Type₀) -> ∀ (b : Type₀) -> b
+attack ; intro "x" ; intro "x"
+warning: x shadows an outer binder of the same word, which no word reaches now
+         — walk up to that binder and rename it to give it one
+```
+
+**Where something below still refers to the binder that died, the warning names
+it**, because that is the part you cannot see from where you are standing — and
+it states the cost, that the term stops reading back as itself:
+
+```
+:theorem shad : ∀ (a : Type₀) -> ∀ (b : Type₀) -> a
+attack ; intro "x" ; intro "x"
+warning: x shadows an outer binder of the same word, which no word reaches now,
+         and shad1 still refers to it — a reference to it prints marked until you
+         rename that binder
+  λ (x : Type₀) -> λ (x : Type₀) -> let ? shad1 : x† in shad1
+```
+
+**`rename` gives the binder at the focus a word.** It is an ordinary tactic over
+the five components, so you walk up to the dead binder and write it:
+
+```
+into ; rename "outer"
+  λ (outer : Type₀) -> λ (x : Type₀) -> let ? shad1 : outer in shad1
+```
+
+**The mark is gone and the reference followed**, because the word is the binder's
+own and everything pointing at it is pointing at the binder. Printing is the
+inverse of reading again for this term, which is what the repair is for. A
+position that is not a component binds nothing a word could reach, so `rename`
+there is refused rather than silently doing nothing.
+
+**A tactic that re-binds one of your words warns too, and that is deliberate.**
+Each arm of a split re-binds the target — and any index the split left friendly —
+under the word you wrote for it, so that writing that word inside the arm reaches
+the refined thing rather than the original argument. That costs the original its
+word exactly as your own second `intro "x"` would, so `induction-core` prints the
+warning once per word it re-bound:
+
+```
+induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now
+         — walk up to that binder and rename it to give it one
+```
+
+**The warning is not narrowed to a word you typed yourself.** It reports what the
+development now looks like, whoever caused it, and the mark on the original binder
+is there either way.
+
 ## Building a frontend
 
 *Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
@@ -6436,6 +8023,26 @@ parser's offers in its own vocabulary.
 So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
 what distinguishes a guess from a claim. It renders what it is handed.
 
+### A proof's name crosses as text, and so does where its lines are
+
+*Decided 2026-11-11.*
+
+A frontend that stores a session writes down the transcript it already has; what
+it cannot work out is which theorems that transcript proved and where each proof
+is in it. `provedSlices` answers that — the name in full, and the first and last
+index into the submitted lines — and `nameDotted` spells any global name as
+declared.
+
+**The shortest-ending printer is deliberately not that function.** What is drawn
+on screen is the shortest ending that is unambiguous under what is open, which
+is right for a pane and wrong for a key that is written to disc and read back
+when something else is open.
+
+**A proof is a run of consecutive lines and not one span**, because a proof
+suspended and resumed is two runs under one name; submitting the runs in the
+order given replays it. Only names the session sealed are listed, so an
+abandoned attempt does not appear.
+
 **The enforcement is cabal's.** A frontend's `build-depends` names `thena:view`,
 which is a re-export list and has no modules of its own; `thena` is then a
 transitive dependency, and Haskell imports only from direct ones:
@@ -6446,10 +8053,11 @@ import Thena.Engine (Machine)
   It is a member of the hidden package 'thena-0.1.0.0'.
 ```
 
-Twelve modules are named: `Thena.Driver`, `Thena.Repl`, `Thena.View` and the
-nine `Thena.View.*`. Nothing else is reachable, and a view that could not be
-used through the list did not survive writing it — `coreView` took a `Core`,
-which a frontend can neither obtain nor name, and became `focusTypeView`.
+The list is `thena.cabal`'s own `reexported-modules` stanza — `Thena.Driver`,
+`Thena.View` and one module per kind of thing it describes, plus the file and
+text doors. Nothing else is reachable, and a view that could not be used through
+the list did not survive writing it — `coreView` took a `Core`, which a frontend
+can neither obtain nor name, and became `focusTypeView`.
 
 **Nothing in the library touches a terminal.** The REPL's line editing lives in
 the `thena` executable, so a frontend that draws its own screen links no line
@@ -6460,6 +8068,31 @@ which are not the terminal's.
 could be the frontend. It was removed: there is no remote client, the same
 boundary is stronger as types than as a schema, and everything the protocol
 carried is now a function call.
+
+### The live choice points are their own view, not a column on the frame stack
+
+*Decided 2026-11-16.*
+
+While a rule is running there may be points the engine can go back to: a call
+where more than one clause's head held, with the untried clauses still waiting.
+`retry` takes one. `choicesView` is the read — the identifier `retry` names each
+point by, the alternative running now, and the ones still to try in dispatch
+order, nearest point first, which is the order a bare `retry` walks.
+
+**The names arrive spelled the way the prompt spells them**, shortest ending
+that still resolves under what is open, so a pane prints a row as it comes.
+**The identifier is not a row number**: it is drawn from the session's name
+counter, so it is stable but not consecutive, and a frontend that numbers its own
+rows would show a number `retry` refuses.
+
+**The machine's frame stack was deliberately left alone.** A frame there says how
+much of it is left to resume and whether control has passed back out, and not
+whether it is a choice — so the same information has exactly one presentation
+instead of two that can disagree.
+
+**The list is empty except while a rule is running or standing in a `yield`**,
+because a proof boundary discards the choice points under it. There is nothing to
+retry at a settled prompt, and that is the answer rather than a missing one.
 
 ### A view is asked for, not handed back
 
@@ -6482,6 +8115,67 @@ nothing else.
 
 Every view is reachable with nothing but `thena:view` on the `build-depends`
 line, and a test suite that depends on exactly that is what keeps it so.
+
+### A declaration that did not go in reports as a kind, typed parts, and whether anything is wrong
+
+*Decided 2026-11-19, MS12.*
+
+A module loads as far as it can, so a frontend is handed items that did not
+finish. **What it is handed is not a message.** `Thena.View.Failure` gives one
+shape for every failure: which failure it is, and its parts — a name as a name,
+a term as the display a term already has, a count as a count — each labelled
+with the role it plays in *that* failure.
+
+**The alternative was one constructor per failure**, which would let a type
+mismatch be drawn as a side-by-side diff that no other failure gets. It was
+refused on measurement: the engine's own error types run to over a hundred
+constructors between them and a total walk costs the same either way, so the
+whole difference falls on the frontend — a hundred-odd layouts to write, growing
+every time the engine gains an error, against one. **What it gives up is
+written down**: a failure that earns a layout of its own needs an arm added for
+it, and if that keeps happening the choice was wrong.
+
+**What was refused outright is a headline plus pieces of text to print.** A
+format that hands a pane pieces of a sentence never says what the pieces *are*,
+so the pane can print `nonesuch` and can never know it is a name — never colour
+it, never offer the module that declares it. And a format that accepts anything
+gets given everything: the next failure is always cheaper to add as another
+headline than to give a view of its own, and the pane ends as a text pane with a
+border.
+
+**Whether anything is wrong is a separate field, with four values**, because
+three of the ways an item can be unfinished are not faults: it may be sitting on
+a question or out of fuel, the kernel may have accepted it while the session's
+trust level did not, and the user may have abandoned it themselves. A pane takes
+its glyph and its wording from that field, so *you typed `:abandon`* never reads
+like an error, and a stop added later draws correctly without anything being
+told.
+
+### A rule file that will not load reports the same way a declaration does
+
+*Decided 2026-11-24, MS12.*
+
+The four kinds of thing you write — a proof, a `language` block, a module, a
+rule base — can each be refused, and all four now hand a frontend the same
+shape: which failure it is, and its typed parts. **A refused rule base was the
+exception until this decision.** It had the sentence the prompt prints and
+nothing structured, so a pane could draw the terminal's text in a window with a
+border, or draw nothing.
+
+Two things made it worth closing rather than living with. A rule base is text
+you are *editing*, so its refusal is what you are working on, not a report about
+something elsewhere; and the vocabulary a rule's refusal is said in was already
+written and already complete — what was missing was the way out of a load. The
+alternative, that an editor draws its own faults for a file it owns and asks
+the session for nothing, is not refuted: it is what a language server would do.
+It was not taken because it would make this one file the thing the system
+refuses without saying why.
+
+**Every shape of refusal is walked**, including the two that are about the
+file's `import` lines rather than its rules. Where the prompt's sentence and a
+pane's fault say different things, the pane is told what the *session* can say:
+a base that imports a module nobody read is told there is no such namespace,
+which is the same answer a name written at that namespace gets.
 
 ### A region is written text and splices, and may name its production
 
@@ -6565,6 +8259,13 @@ straight into the first one.
 
 Only productions that could still leave the line finishable are listed. Inside a
 parenthesis with one slot left, a production needing two does not appear.
+
+**The name on a row is the word, not a path**, which is what the `app:` above has
+always shown and what `LC[app]` takes between its brackets. A production of a language
+declared in a module is `examples.Stlc01Syntax.LC.app` to the parser, and until
+2026-11-14 that is what a list was handed — a name no bracket accepts, and wide enough
+to push the shape off a dropdown. **Nothing has to be opened for the short form**: the
+fence has already said which language, so the bracket is a lookup inside it.
 
 ### A project is text on disk, and there is no other format
 
@@ -6808,7 +8509,7 @@ smallest case of one notion, not a mode of its own.
 
 ```
 thena> :step 500
-thena> prove              -- runs 500 instructions, then pauses
+thena> step              -- runs 500 instructions, then pauses
 thena> :run 500           -- one more slice
 thena> :run               -- and let it finish
 ```

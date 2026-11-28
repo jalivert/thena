@@ -45,6 +45,7 @@ module Thena.Render
   , renderTree
   , parseFailureReason
   , renderMatches
+  , renderRuleClause
   , renderOperand
   ) where
 
@@ -84,6 +85,7 @@ import Thena.Core.Term
   , freeVars
   , fresh
   , open
+  , nameFromText
   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor
@@ -103,17 +105,23 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , MatchedRule (..)
+  , Unfinished (..)
+  , NotDone (..)
   , RuleFileError (..)
   , LoadError (..)
   , Response (..)
   , moduleText
   , ChoicePoint (..)
+  , ChoiceAlt (..)
   , Session
   , Stop (..)
   , machineOf
   , SyntaxError (..)
   , Attempt (..)
   , Parked (..)
+  , Quest (..)
+  , Importing (..)
   )
 
 import Thena.Engine
@@ -155,13 +163,18 @@ import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Syntax.Print
-  ( Env
+  ( corePText
+  , componentPText
+  , dagger
+  , Env
   , escapeChar
   , escapeRaw
   , escapeString
-  , freshen
   , levelArgs
-  , nameOf
+  , reachesIn
+  , Naming (..)
+  , naming
+  , nameAt
   , renderLevel
   , renderLevelAtom
   , renderSurface
@@ -179,6 +192,7 @@ import Thena.Global.Env
   )
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , Identifier (..)
   , Instr (..)
   , Op
   , Operand (..)
@@ -188,7 +202,7 @@ import Thena.Instral.Ops
   , operandsOf
   )
 import Thena.Tactics.Specialise (binderWord)
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Rules (RuleBase (..), RuleError (..), RuleFault (..), patternKind)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -199,6 +213,7 @@ import Thena.Syntax.Parser (ParseError (..))
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, stripPrefix, intercalate, nub, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
+import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Infer (renderInstralTypeError)
 
 -- | A 'Trouble' as the lines it would have been printed as.
@@ -245,16 +260,16 @@ renderResponse :: Session -> Response -> [String]
 renderResponse s resp = let ren = renderingOf s in case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
-  ParsedObject t -> [renderTree t]
+  ParsedObject t -> [renderTreeIn ren t]
   ParsingEntered lang ->
     [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, "
         ++ [Earley.placeholderChar] ++ " is a part not written yet, :done leaves" ]
   ParsingLeft lang -> ["done parsing " ++ lang]
-  ObjectUnparsed lang text why -> [renderUnparsed lang text why]
+  ObjectUnparsed lang text why -> [renderUnparsedIn ren lang text why]
   Rendered t     -> [renderCore ren (contextOf s) t]
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
-  ShownData d    -> renderInductive ren d
+  ShownData d cps -> renderInductive ren d cps
   ShownRules d   -> renderRules ren d
   ShownEliminator g ty  -> renderEliminator ren g ty
   ShownGlobal g lvs cs ps ty body -> renderGlobal ren g lvs cs ps ty body
@@ -265,8 +280,8 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- phase 43). The core term it built is deliberately not shown: it was rewound
   -- with the rest of the line, and naming a hole the session no longer has
   -- would invite a @goto@ into nothing.
-  InferredSurface t ty ->
-    [renderSurface t ++ " : " ++ renderCore ren (contextOf s) ty]
+  InferredSurface t ps ty ->
+    [renderSurface t ++ " : " ++ signatureIn ren (contextOf s) ps ty]
   IllTyped e     -> renderTypeError ren e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
@@ -283,6 +298,10 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- **Nothing of its own, like the other five requests**: what a replay has to
   -- say is the responses of the lines it submitted (MS11 phase 302).
   ReplayRequested _ -> []
+  -- **The same, and for the same reason** (MS12 phase 317): what an abandon has
+  -- to say is 'ImportAbandonedItem' and the module's own answer behind it, both
+  -- of which @following@ produces after this line.
+  AbandonRequested _ -> []
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
@@ -318,6 +337,93 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
       ++ map renderWarning ws
+  -- **A MODULE THAT WENT IN AS FAR AS IT COULD** (MS12 phase 315, @~mgqwb@).
+  -- The same shape 'ProofLoaded' has, because the same thing happened to what
+  -- went in, and then what did not.
+  --
+  -- **ONE FAILURE AND N PENDING, NOT N+1 FAILURES** — his ruling of
+  -- 2026-11-11. The first item that did not go through is the root and its own
+  -- answer is printed in full, indented under it; the rest are named on one
+  -- line and nothing is said about why, because nothing worked out why. A
+  -- module whose third declaration broke would otherwise bury its own reason
+  -- under forty-seven copies of /not in scope/.
+  ProofLoadedPartly nm ds blocks ws unfin ->
+    ("module " ++ nm)
+      : map ("  declared " ++) ds
+      ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
+      ++ map renderWarning ws
+      ++ case unfin of
+           [] -> []
+           root : pending ->
+             ( "  " ++ named root ++ " did not go in:" )
+               : map ("    " ++) (renderNotDone ren s (unfinishedWhy root))
+               ++ [ "  and " ++ plural (length pending) "more" ++ " pending: "
+                      ++ intercalate ", " (map named pending)
+                  | not (null pending) ]
+    where
+      -- **A declaration that declared nothing still has to be nameable**: an
+      -- item may be a @do@ block or a grammar, which the summary cannot list,
+      -- so the list is said where there is one and the word stands in where
+      -- there is not.
+      named u = case unfinishedDeclares u of
+        [] -> "an item"
+        xs -> intercalate ", " xs
+  -- **A load that is standing still, and both ways out of it** (MS12 phase
+  -- 309). What the run printed before it stopped comes first, as it would
+  -- have on its own; then the yield's own message; then what to type.
+  --
+  -- **It says the module is waiting, which a bare yield message did not.** The
+  -- un-built behaviour answered a plain 'Yielded' here and the session had
+  -- already been rolled back, so the user was told control had been handed over
+  -- and it had not been.
+  ImportSuspended nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
+         ]
+  -- Its twin for a second stop in the same load (MS12 phase 309): the wording
+  -- says it carried on, so a user cannot read it as a second import starting.
+  ImportResumed nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  still elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
+         ]
+  -- **It names what went** (MS12 phase 309, his ruling of 2026-11-11 that
+  -- abandoning takes everything): a user who declared a lemma at the prompt
+  -- during the suspension loses it with the module, and a message that did not
+  -- say so would be the silent half of that.
+  ImportAbandoned nm n mine ->
+    ("abandoned the import of " ++ nm ++ ", and took " ++ plural n "declaration")
+      : [ "  including yours: " ++ intercalate ", " (map (nameString ren) mine)
+        | not (null mine) ]
+  -- **It says where the import went and how to get it back** (MS12 phase 310,
+  -- his ruling of 2026-11-11 that nothing unparks itself): the list is
+  -- @:proofs@ and the word is the module's, so both halves of picking it up
+  -- again are in the line that put it down.
+  -- **It says what went and that the module did not** (MS12 phase 317, his
+  -- ruling of 2026-11-14). 'ProofLoadedPartly' follows it and names the item
+  -- among the unfinished, but it cannot know that a lemma of the user's went
+  -- back with the elaboration — which is the half of 'ImportAbandoned''s
+  -- message that is still true at this scope.
+  ImportAbandonedItem nm ds mine ->
+    ( "gave up "
+        ++ (case ds of { [] -> "the declaration being elaborated" ; _ -> intercalate ", " ds })
+        ++ " — the rest of " ++ nm ++ " carries on" )
+      : [ "  and took " ++ plural (length mine) "declaration"
+            ++ " of yours: " ++ intercalate ", " (map (nameString ren) mine)
+        | not (null mine) ]
+  ImportParked nm ->
+    [ "parked the import of " ++ nm
+    , "  it is in :proofs — :resume " ++ nm ++ " to carry on with it"
+    ]
+  -- Its twin. The wording is 'ImportSuspended''s, because what the user is
+  -- holding afterwards is the same thing: a load standing in a yield.
+  ImportPickedUp nm ->
+    [ "picked the import of " ++ nm ++ " back up"
+    , "  still elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
+    ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   -- **Only what the line itself had to say** (MS11 phase 298): the act's own
@@ -389,7 +495,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Failed e       -> [renderSyntaxError e]
   -- The same errors a rule file is refused with, said without the /in rule ‹r›,
   -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
-  LineRefused es -> map whatRuleError es
+  LineRefused es -> map (whatLineError . faultWhy) es
   Rejected e     -> [renderCommandError ren e]
   Quit           -> []
 
@@ -402,6 +508,16 @@ renderResponse s resp = let ren = renderingOf s in case resp of
 -- number. @:show@ renders from the root and needs no seed.
 contextOf :: Session -> Context
 contextOf = focusContext . development . machineOf
+
+-- | Why an item in a partly-loaded module did not finish (MS12 phase 325).
+--
+-- **The text door's half of the narrowing.** 'Thena.Driver.unfinishedWhy' was a
+-- whole 'Response' and this was 'renderResponse'; a 'NotDone' says the same two
+-- things in a type a pane can also lay out, so the words here do not move.
+renderNotDone :: Rendering -> Session -> NotDone -> [String]
+renderNotDone ren s nd = case nd of
+  ItStopped msgs ws stop -> msgs ++ map renderWarning ws ++ renderStop ren s stop
+  ItWasAbandoned         -> [renderCommandError ren GaveItUp]
 
 renderStop :: Rendering -> Session -> Stop -> [String]
 renderStop ren s stop = case stop of
@@ -421,7 +537,7 @@ renderStop ren s stop = case stop of
   -- The same words the prompt gives for the same two mistakes ('LineRefused'
   -- and 'EntryMistyped'), because a block is checked by the same checker —
   -- it is only reached later now (MS6 phase 104b).
-  BlockRefused es        -> map whatRuleError es
+  BlockRefused es        -> map (whatLineError . faultWhy) es
   BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
   -- **The machine, and not a word about the spend** (phase 128). The number is
   -- for a job's pane; here the printed machine /is/ the sign that the run is not
@@ -637,6 +753,7 @@ describe t = case t of
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
+  TAt         -> "at"
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
@@ -772,8 +889,7 @@ owedArgument ren ctx a b = case (a, b) of
       "they differ by one argument, which the shorter side has to take first: "
         ++ renderCore ren ctx dom
 
--- | Display names for a context's variables, freshened as the chain printer
--- freshens a component's.
+-- | The scope a context is, as a printer sees it — innermost first.
 --
 -- __A variable that is definitionally another variable prints as that one__
 -- (MS9 phase 236, his direction of 2026-10-29). @fill@ parks every elaborated
@@ -808,10 +924,14 @@ envOf = foldl add []
             Definition x (Ident h) _ _ -> (x, h)
        in (v, nameFor e entry hint) : e
 
+    -- __The alias keeps its own word for reaching and borrows one for showing__
+    -- (his ruling of 2026-11-20): the word a reader types still has to find
+    -- the entry it finds, so only the shown half is borrowed. Judged on the
+    -- borrowed word instead, the alias would mark its own endpoint dead.
     nameFor e entry hint = case entry of
       Definition _ _ (Free w) _
-        | Just name <- lookup w e -> name
-      _                         -> freshen hint e
+        | Just n <- lookup w e -> Naming hint (namingShown n)
+      _                        -> naming hint
 
 go :: Rendering -> Env -> Prec -> Core -> String
 
@@ -826,7 +946,7 @@ go ren@(Rendering gs _ _ _) env _ term
   | Just txt <- printTerm gs (renderingScope ren) (go ren env AtTop) term = txt
 go ren@(Rendering _ n _ _) env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
-  Free v                -> nameOf v env
+  Free v                -> nameAt v env
   Global g ls -> nameString ren g ++ levelArgs ls
   Universe l            -> renderLevel l
 
@@ -854,12 +974,12 @@ go ren@(Rendering _ n _ _) env prec term = case term of
 
   Let (Ident hint) val ty sc ->
     let (v, n1) = fresh n
-        name    = freshen hint env
+        name    = hint
      in parensIf (prec > AtTop) $
           "let " ++ name
             ++ " = " ++ go (ren { renderingNames = n1 }) env AtTop val
             ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop ty
-            ++ " in " ++ go (ren { renderingNames = n1 }) ((v, name) : env) AtTop (open v sc)
+            ++ " in " ++ go (ren { renderingNames = n1 }) ((v, naming name) : env) AtTop (open v sc)
 
   -- A 'Canonical' prints as its own wrapper applied — @succ zero@, not a
   -- bracketed internal form. DECIDED by the user 2026-08-22.
@@ -932,9 +1052,9 @@ chainLam :: Rendering -> Env -> [String] -> Core -> String
 chainLam ren@(Rendering _ n _ _) env acc term = case term of
   Lam (Ident hint) dom sc ->
     let (v, n1) = fresh n
-        name    = freshen hint env
+        name    = hint
         group   = "(" ++ name ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop dom ++ ")"
-     in chainLam (ren { renderingNames = n1 }) ((v, name) : env) (group : acc) (open v sc)
+     in chainLam (ren { renderingNames = n1 }) ((v, naming name) : env) (group : acc) (open v sc)
   _ -> unwords (reverse acc) ++ " -> " ++ go ren env AtTop term
 
 -- | The same for ∀, except that a non-dependent 'Pi' ends the run — it goes on
@@ -944,9 +1064,9 @@ chainPi ren@(Rendering _ n _ _) env acc term = case term of
   Pi (Ident hint) dom sc
     | dependent n sc ->
         let (v, n1) = fresh n
-            name    = freshen hint env
+            name    = hint
             group   = "(" ++ name ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop dom ++ ")"
-         in chainPi (ren { renderingNames = n1 }) ((v, name) : env) (group : acc) (open v sc)
+         in chainPi (ren { renderingNames = n1 }) ((v, naming name) : env) (group : acc) (open v sc)
   _ -> unwords (reverse acc) ++ " -> " ++ go ren env AtTop term
 
 parensIf :: Bool -> String -> String
@@ -1017,10 +1137,10 @@ goP ren env ind route p = case p of
 -- caller places them. Shared with @:where@, which prints exactly this line for
 -- a component focus.
 link :: Rendering -> Env -> Component -> (String, Env)
-link ren env c = (text, (v, name) : env)
+link ren env c = (text, (v, naming name) : env)
   where
     (v, hint) = bound c
-    name      = freshen hint env
+    name      = hint
     text      = case c of
       Assume _ _ ty     -> "λ (" ++ name ++ " : " ++ go ren env AtTop ty ++ ") ->"
       Define _ _ val ty ->
@@ -1070,7 +1190,7 @@ inward _                             = Nothing
 renderWhere :: Rendering -> Cursor -> [String]
 renderWhere ren cur =
   section "focus"   [focusText]
-    ++ section "path"    [intercalate " ▸ " ("root" : crumbs ++ coreCrumbs)]
+    ++ section "path"    [intercalate " ▸ " ("root" : map crumb crumbs ++ coreCrumbs)]
     ++ section "context" (if null ctx then ["(nothing in scope)"] else map entry ctx)
     ++ maybe [] (\t -> section "type" [go ren env' AtTop t]) (expectedType cur)
   where
@@ -1086,11 +1206,19 @@ renderWhere ren cur =
         let (e, ws) = walkTerm env (toList ts)
          in (e, crossingWord x : ws, go ren e AtTop t)
 
+    -- __A row whose word no longer reaches it is marked and still listed__ —
+    -- his ruling of 2026-11-20. A marked occurrence with no row to point at
+    -- would leave the reader nothing to look up.
     entry e = case e of
       Hypothesis v _ ty ->
-        nameOf v env' ++ " : " ++ go ren env' AtTop ty
+        nameAt v env' ++ " : " ++ go ren env' AtTop ty
       Definition v _ val ty ->
-        nameOf v env' ++ " = " ++ go ren env' AtTop val ++ " : " ++ go ren env' AtTop ty
+        nameAt v env' ++ " = " ++ go ren env' AtTop val ++ " : " ++ go ren env' AtTop ty
+
+    -- __The path is read from the focus__, which is where @goto@ is typed, so a
+    -- step whose word something nearer has taken is marked there too.
+    crumb (Just v, w) | not (reachesIn v env') = w ++ [dagger]
+    crumb (_, w)                               = w
 
 -- | Walk the prefix root first, collecting display names and breadcrumb words.
 --
@@ -1098,16 +1226,18 @@ renderWhere ren cur =
 -- rule, so the two agree wherever they overlap. A guess adds a crumb and no
 -- name, which is §4.5's Γ rule showing up in the display for the same reason it
 -- shows up in 'context'.
-walkSteps :: [Step] -> (Env, [String])
+walkSteps :: [Step] -> (Env, [(Maybe Var, String)])
 walkSteps = foldl add ([], [])
   where
     add (env, crumbs) s = case s of
       Along c ->
         let (v, hint) = bound c
-            name      = freshen hint env
-         in ((v, name) : env, crumbs ++ [name])
-      Past _ -> (env, crumbs ++ ["≟"])
-      IntoGuess _ (Ident hint) _ _ -> (env, crumbs ++ ["≐ " ++ freshen hint env])
+         in ((v, naming hint) : env, crumbs ++ [(Just v, hint)])
+      Past _ -> (env, crumbs ++ [(Nothing, "≟")])
+      -- A guess adds a crumb and no name, so there is no variable here to ask
+      -- about: the word is the hole's own identifier, freshened against the
+      -- development when the hole was built.
+      IntoGuess _ (Ident hint) _ _ -> (env, crumbs ++ [(Nothing, "≐ " ++ hint)])
 
 -- | The same for the core path. Only the three binder steps add a name.
 walkTerm :: Env -> [TermStep] -> (Env, [String])
@@ -1116,8 +1246,7 @@ walkTerm env0 = foldl add (env0, [])
     add (env, crumbs) s = case binderOf s of
       Nothing        -> (env, crumbs ++ [partWord (partOf s)])
       Just (v, hint) ->
-        let name = freshen hint env
-         in ((v, name) : env, crumbs ++ [partWord (partOf s)])
+        ((v, naming hint) : env, crumbs ++ [partWord (partOf s)])
 
 binderOf :: TermStep -> Maybe (Var, String)
 binderOf s = case s of
@@ -1226,9 +1355,9 @@ telescopeOf ren env (e : rest) =
   let (v, hint, ty) = case e of
         Hypothesis x (Ident h) s   -> (x, h, s)
         Definition x (Ident h) _ s -> (x, h, s)
-      name  = freshen hint env
+      name  = hint
       group = "(" ++ name ++ " : " ++ go ren env AtTop ty ++ ")"
-      (groups, env') = telescopeOf ren ((v, name) : env) rest
+      (groups, env') = telescopeOf ren ((v, naming name) : env) rest
    in (group : groups, env')
 
 pad :: Int -> String
@@ -1369,6 +1498,12 @@ renderValue ren ctx v = case v of
   -- form is the fallback 'nameDotted' documents — the printer's shortest-ending
   -- policy is over terms, and a bare name value has no scope to shorten in.
   VName g            -> nameDotted g
+  -- **An identifier prints as its word, and the token is NOT shown** (MS12
+  -- phase 353). **His, 2026-11-19**, of the name counter: /"The counter is sort
+  -- of like a thing that is invisible to the user, in a way. User doesn't own
+  -- it."/ So a token has no spelling to print and no number a reader could use;
+  -- what they can use is the word the binder will display.
+  VIdent i           -> identString (identWord i)
   VInt k             -> show k
   VChar c            -> escapeChar c
   VBool True         -> "true"
@@ -1431,6 +1566,33 @@ renderCommandError ren e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
+  -- **Not a failure, which is why it is worded as a thing the user did** (MS12
+  -- phase 317): it stands where a refusal stands in a partly-loaded module's
+  -- list, and the item is there because @:abandon@ was typed and not because
+  -- anything went wrong.
+  GaveItUp             -> "you gave it up with :abandon"
+  -- **It names the import that is waiting and both ways out of it** (MS12 phase
+  -- 309), which is 'AlreadyProving''s shape: a refusal that does not say what to
+  -- do next leaves the user stuck in the state it refused from.
+  ImportInFlight nm    -> "the import of " ++ nm
+                            ++ " is still waiting — yield to carry on with it, :suspend to park it, or :abandon to give it up"
+  -- **Its sibling for an import that is already put down** (MS12 phase 310):
+  -- one import at a time, in flight or parked, and the way out of this one is
+  -- to pick it up rather than to hand it back.
+  ImportIsParked nm    -> "the import of " ++ nm
+                            ++ " is parked — :resume " ++ nm ++ " to carry on with it"
+  -- **The one refusal this phase added that is about saving work** (MS12 phase
+  -- 309, his ruling of 2026-11-11). Until here a proof opened inside a yield
+  -- silently threw the suspended elaboration away.
+  -- **The repair depends on what is standing there** (MS12 phase 310): a bare
+  -- yield at the prompt can only be handed back, and an import can be parked
+  -- instead — which is the first step of the five his ruling of 2026-11-11
+  -- describes, and the reason a lemma can be proved in the middle of a load at
+  -- all.
+  ProvingWhileYielding mi ->
+    "a rule has handed control over — yield to hand it back before starting a proof"
+      ++ maybe "" (\nm -> ", or :suspend to park the import of " ++ nm) mi
+  NobodyToYieldTo nm   -> nm ++ " handed control over, and nothing here can take it — nothing was loaded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
   NotParsing           -> ":done leaves :parse's mode, and this is not it"
@@ -1451,7 +1613,7 @@ renderCommandError ren e = case e of
     "a rule base may not be loaded while " ++ nameString ren g ++ " is being proved"
   ProofsSuspended names ->
     "a rule base may not be loaded while proofs are suspended: "
-      ++ intercalate ", " (map (nameString ren) names)
+      ++ intercalate ", " names
 
 renderFailReason :: Rendering -> FailReason -> String
 renderFailReason ren r = case r of
@@ -1514,11 +1676,22 @@ renderFailReason ren r = case r of
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
-  NoSuchNamespace n -> "nothing is named " ++ n ++ ".…, so there is no namespace " ++ n ++ " to open"
+  -- **The name is quoted and the dotted form is spelled out** (MS12 phase
+  -- 311). It read @nothing is named Nat .…@, where the @.…@ looks like an
+  -- elision the renderer leaked rather than anything a user wrote, and an
+  -- unquoted name with a space in it says nothing about what went wrong.
+  NoSuchNamespace n ->
+    "no name begins with " ++ show (n ++ ".")
+      ++ ", so there is no namespace " ++ show n ++ " to open"
   AmbiguousName n gs ->
     n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
       ++ "\n  write the one you mean"
   ExpectedName      -> "expected a name"
+  ExpectedIdent     -> "expected an identifier"
+  WordBindsNothing w ->
+    w ++ " is a word and nothing more, so there is no variable it means"
+      ++ "\n  a term can be made only from an identifier a binder was opened"
+      ++ " at — a binder position in a pattern, or the one `intro` adopted"
   DottedTextName s  ->
     show s
       ++ " is text, so all of it is one word — and a word may not hold a dot."
@@ -1533,6 +1706,11 @@ renderFailReason ren r = case r of
   NotAGuessHere       -> "that is not a guess"
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
+  -- **It says where the word lives**, because walking up to the binder is the
+  -- operation (MS12 phase 330): the focus is somewhere a word belongs to no
+  -- binder, and the user's next move is to get to one.
+  NotABinderHere      -> "rename wants a binder at the focus: walk up to the one"
+                      ++ " whose word you are changing"
   GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
   CannotBuildDatatype why -> case why of
     DeclaredTypeIsNotAUniverse d ->
@@ -1665,15 +1843,22 @@ renderPosition p = case p of
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 -- | @:proofs@ — what the session is holding (§2.4).
-renderProofs :: Rendering -> Maybe Attempt -> [Parked] -> [String]
+--
+-- **A parked import is in the same list under its module name — HIS RULING of
+-- 2026-11-11**, and the words are /\"one list one word\"/. It is printed with
+-- what it is rather than with a statement, because it has none: an import is a
+-- load that stopped, and nothing will certify it.
+renderProofs :: Rendering -> Maybe Quest -> [Parked] -> [String]
 renderProofs ren cur ps
   | null everything = ["no proofs"]
   | otherwise       = everything
   where
     everything = maybe [] (pure . line "▶ ") cur
-                 ++ map (line "  " . parkedAttempt) ps
-    line mark att =
-      mark ++ nameString ren (attemptName att) ++ " : " ++ renderCore ren [] (attemptClaim att)
+                 ++ map (line "  " . parkedQuest) ps
+    line mark q = case q of
+      AProof att ->
+        mark ++ nameString ren (attemptName att) ++ " : " ++ renderCore ren [] (attemptClaim att)
+      AnImport imp -> mark ++ importingText imp ++ " : an import, standing in a yield"
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of
@@ -1686,6 +1871,7 @@ renderMoveError m = case m of
   NoCrossingIntoAConstraint -> "there is no position inside a constraint"
   NoSuchHole    -> "that names no hole or guess"
   NoSuchPart     -> "the focus has no such part"
+  NoGoalLeft     -> "there is no goal left to go to"
 
 -- --------------------------------------------------------------------------
 -- Declarations, made readable (§3.7)
@@ -1703,8 +1889,8 @@ renderMoveError m = case m of
 -- (§3.7), while the indices are printed as the type they bind, so that
 -- 'renderCore' decides between @Nat -> Type\8320@ and @\8704 (n : Nat) -> \8230@ by
 -- its own rule (§2.6).
-renderInductive :: Rendering -> InductiveDefinition -> [String]
-renderInductive ren d = case inductiveConstructors d of
+renderInductive :: Rendering -> InductiveDefinition -> [(GlobalName, [Plicity])] -> [String]
+renderInductive ren d cps = case inductiveConstructors d of
   -- @header@ already ends in @where@ — a datatype with no constructors gets
   -- the empty brace group and nothing else. It said @where where { }@ until
   -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
@@ -1727,7 +1913,7 @@ renderInductive ren d = case inductiveConstructors d of
     -- A parameter's type sees the parameters before it and no more.
     group (i, e) =
       " ("
-        ++ nameOf (entryVar e) penv
+        ++ nameAt (entryVar e) penv
         ++ " : "
         ++ renderCore ren (take i ps) (entryType e)
         ++ ")"
@@ -1736,10 +1922,18 @@ renderInductive ren d = case inductiveConstructors d of
     -- own arguments. Its stored type abstracts the parameters as well — that is
     -- what makes it a function (§3.7) — and printing /that/ here would rebind
     -- them and freshen the second copy to @A1@.
+    -- **A brace it was written with is printed back** (MS12 phase 320,
+    -- `~td9j6`), by the same table and the same leading-run rule a
+    -- definition's signature is printed by — see 'signature'. The parameters
+    -- are dropped off the front of the list because they are already in scope
+    -- here: the record covers every argument position of the constructor as a
+    -- function, parameters first ('Thena.Driver.datatypeProgram').
     line c =
       nameString ren (constructorName c)
         ++ " : "
-        ++ renderCore ren ps (piOver (constructorArguments c) (constructorTarget d c))
+        ++ signatureIn ren ps
+             (drop (length ps) (fromMaybe [] (lookup (constructorName c) cps)))
+             (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
 
@@ -1771,7 +1965,7 @@ renderRules ren d = case inductiveConstructors d of
     rule c =
       let args  = constructorArguments c
           at i  = ps ++ take i args
-          named i e = nameOf (entryVar e) (envOf (at (i + 1)))
+          named i e = nameAt (entryVar e) (envOf (at (i + 1)))
           above =
             [ named i e ++ " : " ++ paper (at i) (entryType e)
             | (i, e) <- zip [0 :: Int ..] args
@@ -1888,20 +2082,47 @@ scheme ren lvs cs ps ty =
 -- application with its inserted arguments dropped would not be the term that
 -- is there.
 signature :: Rendering -> [Plicity] -> Core -> String
-signature ren@(Rendering _ n0 _ _) ps0 ty0 = braced n0 [] ps0 ty0
+signature ren ps0 ty0 = signatureIn ren [] ps0 ty0
+
+-- | 'signature' with the binders already in scope — a @data@ block's
+-- parameters (MS12 phase 320), which the constructor lines are printed under.
+signatureIn :: Rendering -> Context -> [Plicity] -> Core -> String
+signatureIn ren@(Rendering _ n0 _ _) ctx0 ps0 ty0 = braced n0 ctx0 [] ps0 ty0
   where
     -- Only the **leading** implicit binders are peeled. The moment a position
-    -- is explicit the rest is an ordinary core type and 'renderCore' prints it
-    -- — grouping the binders the way it always has, which peeling them one at a
-    -- time here would lose.
+    -- is explicit the rest is an ordinary core type and 'renderCore' prints it.
+    --
+    -- **The whole run is ONE @∀@** (MS12 phase 320): it is how 'renderCore'
+    -- prints a run of explicit binders and it is what an author writes, and
+    -- until this phase the peel printed a @∀@ apiece — which nothing noticed
+    -- while the only implicit signatures in the tree had one binder, and which
+    -- made a judgment's rule unreadable the moment its metavariables became
+    -- implicit: @∀ {Γ : Ctx} -> ∀ {x : String} -> ∀ {T : Ty} -> …@ for what a
+    -- paper writes as three names.
     --
     -- The opened binder goes into the context, so the codomain prints it by
     -- name rather than as a bare variable.
-    braced n ctx (Implicit : more) (Pi i dom sc) =
-      let (v, n1) = fresh n
-       in "∀ {" ++ identString i ++ " : " ++ renderCore (at n) ctx dom ++ "} -> "
-            ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
-    braced n ctx _ ty = renderCore (at n) ctx ty
+    braced n ctx bs (p : more) (Pi i dom sc)
+      -- **An explicit position is peeled too, when something names it** — a
+      -- judgment's named premise, `p1 : Γ ⊢ M : T`, which is a premise and
+      -- stays explicit while the metavariables around it do not. Peeling it
+      -- keeps the run in one @∀@; stopping here would print
+      -- @∀ {Γ : Ctx} -> ∀ (p1 : …) -> …@, two quantifiers for one telescope.
+      --
+      -- **An explicit position nothing names is left to 'renderCore'**, which
+      -- prints it as an arrow — @Premise -> …@ — and that is the right spelling
+      -- for all but one of a rule's premises. So the run ends there, with the
+      -- @->@ the fall-through writes.
+      | Implicit <- p = peel ("{" ++ shown ++ "}")
+      | named         = peel ("(" ++ shown ++ ")")
+      where
+        (v, n1)  = fresh n
+        shown    = identString i ++ " : " ++ renderCore (at n) ctx dom
+        named    = v `elem` freeVars (open v sc)
+        peel one = braced n1 (ctx ++ [Hypothesis v i dom]) (bs ++ [one]) more (open v sc)
+    braced n ctx bs _ ty
+      | null bs   = renderCore (at n) ctx ty
+      | otherwise = "∀ " ++ unwords bs ++ " -> " ++ renderCore (at n) ctx ty
 
     -- The counter moves as the binders are peeled, so each nested render gets
     -- the one that is current rather than the one this call started with.
@@ -1912,6 +2133,15 @@ signature ren@(Rendering _ n0 _ _) ps0 ty0 = braced n0 [] ps0 ty0
 -- **The word is what tells a reader it is not a failure.** A load that warns
 -- has installed everything it named, and the line says what was not done
 -- rather than what went wrong.
+-- | What a warning about a shadowed binder names: the components that still
+-- refer to it, or the fact that something below does where no component can be
+-- named for it (MS12 phase 330).
+referring :: [String] -> String
+referring refs = case refs of
+  []       -> "the term below still refers"
+  [r]      -> r ++ " still refers"
+  _        -> intercalate ", " refs ++ " still refer"
+
 renderWarning :: Warning -> String
 renderWarning w = "warning: " ++ case w of
   VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
@@ -1946,6 +2176,20 @@ renderWarning w = "warning: " ++ case w of
   -- **It names the base, because the line to change is the one that names it**
   -- (MS11 phase 298) — and it says what the word would have added, since that
   -- is the thing the author believed they were asking for.
+  -- **It says what was lost and what gets it back** (MS12 phase 330): the word,
+  -- and the one operation that gives the dead binder another one. Nothing is
+  -- broken — no term changed — so the line does not read as a refusal.
+  BinderShadows x ->
+    x ++ " shadows an outer binder of the same word, which no word reaches now"
+      ++ " — walk up to that binder and rename it to give it one"
+  -- **The references are named, because they are what the user cannot see from
+  -- where they are standing** — his second shape. They print marked from here
+  -- on, which is the cost worth stating: the term no longer reads back as
+  -- itself until the outer binder is renamed.
+  BinderShadowsReferenced x refs ->
+    x ++ " shadows an outer binder of the same word, which no word reaches now"
+      ++ ", and " ++ referring refs ++ " to it — a reference to it prints marked"
+      ++ " until you rename that binder"
   PublicConsultIdle b ->
     "public consult " ++ b ++ " acts as a plain consult: a rule file's consult"
       ++ " already hands the base on to whoever consults this one"
@@ -1984,7 +2228,7 @@ renderDeclareError ren e = case e of
     NoSuchGrammar -> g ++ " is not a language, a context or a judgment that is declared"
     ConstructorsUnspelled cs ->
       blockAt k g ++ ": it declares a role, so it generates " ++ g
-        ++ "'s substitution from these productions \8212 and "
+        ++ "'s substitution from these productions — and "
         ++ intercalate ", " cs ++ (case cs of { [_] -> " is"; _ -> " are" })
         ++ " a constructor of " ++ g ++ " that no production spells"
     NotationMetavars ms ->
@@ -2018,7 +2262,7 @@ renderDeclareError ren e = case e of
         x ++ " is not written in the notation, so that argument could not be given"
       ParamNotReadable x t ->
         x ++ " names an argument of " ++ renderCore ren [] t
-          ++ ", which no notation reads by itself \8212 if it is a String, say which"
+          ++ ", which no notation reads by itself — if it is a String, say which"
           ++ " token class, as ( " ++ x ++ " : \8249class\8250 )"
       NoSuchTokenClass x -> x ++ " is not a declared token class"
       NotAMetavariable x -> x ++ " is not a metavariable"
@@ -2059,7 +2303,7 @@ renderDeclareError ren e = case e of
       FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
       UniverseSlot x lvl ->
         x ++ " is a slot at " ++ universeSpelling lvl
-          ++ ", and this block generates its arguments' types from its slots \8212 so declare the "
+          ++ ", and this block generates its arguments' types from its slots — so declare the "
           ++ "datatype and give it notation instead"
       RolesAfterTheGrammar gr ->
         "a role belongs to the block that installs the grammar, and " ++ nameString ren gr
@@ -2320,7 +2564,7 @@ renderClash ren clash = case clash of
 
 -- | A variable's display name, taken from the context the error carries.
 nameIn :: Context -> Var -> String
-nameIn ctx x = nameOf x (envOf ctx)
+nameIn ctx x = nameAt x (envOf ctx)
 
 -- | A name, written the way the reader of this text would write it (MS10
 -- phase 254) — see 'Thena.Core.Term.shortestEnding'.
@@ -2391,19 +2635,61 @@ renderBases bs = concatMap one bs
     one b = (baseName b ++ maybe "" ("   " ++) (baseDescription b)) : ["    " ++ basePath b]
 
 -- | @:rules@ — the rules themselves, under the base each came from, in search
--- order. The per-rule line is @:matches@\', so a rule reads the same in both.
+-- order, **one line per CLAUSE**.
+--
+-- **It stopped sharing a line with @:matches@ on 2026-11-19**, and the two now
+-- answer different questions on purpose. @:matches@ is /what could I do here/,
+-- so his ruling collapsed it to one row per name and arity. This is /what is in
+-- this file/, where a clause is the thing that is in it: a base listing that
+-- showed @elaborate ‹t›@ once would be hiding twenty-two written rules from
+-- someone reading the file they came from.
+--
+-- **So the clause\'s patterns stay here as written** — @reverse-onto []
+-- ‹acc›@ beside @reverse-onto [x, ...xs] ‹acc›@ — which is what they are for:
+-- they say what shape that clause takes, and here there is a second row for
+-- them to be told apart from.
 renderRuleBases :: Rendering -> [RuleBase] -> [String]
 renderRuleBases _ [] = ["no rule base is loaded"]
 renderRuleBases ren bs = concatMap one bs
   where
-    one b = baseName b : map ("  " ++) (renderMatches ren (baseRules b))
+    one b = baseName b : map (("  " ++) . renderRuleClause ren) (baseRules b)
+
+-- | One clause's own line: its name and its parameters as written.
+--
+-- **A variable keeps its corners and anything else is shown as written.** The
+-- corners say /put something here/, which is true of @x@ and false of
+-- @[a, ...rest]@ — that one says what shape the something must be (MS5 phase
+-- 82). This is the half of the old @:matches@ line that stayed true when a row
+-- became a rule: here there is a second row for a shape to be told apart from.
+--
+-- **Exported so one spelling serves the listing and the check on it**:
+-- "Thena.View.Rules" draws the same line from a 'Thena.View.Rules.RuleView',
+-- and @Thena.View.RulesTests@ crosses the two.
+-- **AND ITS FOCUS, WHEN IT WROTE ONE** (MS12 phase 358, @~9j34x@). A clause
+-- that asks about the focus says so on its own line, for the reason the
+-- parameters are here: the listing's job is to let a reader tell two clauses of
+-- one name apart, and after @at@ lands in the base the focus is what tells most
+-- of them apart.
+renderRuleClause :: Rendering -> Rule -> String
+renderRuleClause ren r =
+  unwords
+    (nameString ren (ruleName r) : map written (ruleParams r))
+      ++ focusPart
+  where
+    written pt = case pt of
+      PVar n -> "‹" ++ n ++ "›"
+      _      -> renderPattern pt
+
+    focusPart = case ruleFocus r of
+      Nothing -> ""
+      Just cp -> " at " ++ componentPText written cp
 
 renderRuleFileError :: Rendering -> FilePath -> RuleFileError -> [String]
 renderRuleFileError ren path e = case e of
   NoRuleHeader ->
     [ path ++ ": needs a header line — rule base \8249name\8250 \8249description\8250 where" ]
   RuleSyntaxError se -> [path ++ ": " ++ renderSyntaxError se]
-  RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren) es)
+  RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren . faultWhy) es)
   -- **A caller's mistake, said plainly** (MS11 phase 276), the twin of
   -- 'ConsultsUnread': a base that states a dependency reached a door that
   -- cannot read a file.
@@ -2428,7 +2714,7 @@ whereRuleError :: Rendering -> RuleError -> String
 whereRuleError ren e = case e of
   DeclarationInBody g i   -> inRule g i
   BoundNonProducing g i _ -> inRule g i
-  UnboundInRule g i _     -> inRule g i
+  UnboundInRule g i _ _   -> inRule g i
   NoSuchTest g _          -> inName g
   ObjectRegionUnparsed g i _ _ _ -> inRule g i
   ObjectRegionNotATerm g i _ _   -> inRule g i
@@ -2437,6 +2723,10 @@ whereRuleError ren e = case e of
   BadTestOperands g _     -> inName g
   ReservedName g _        -> inName g
   BadPattern g _          -> inName g
+  CorePatternForm g _     -> inName g
+  CorePatternNotInScope g _  -> inName g
+  CorePatternAmbiguous g _ _ -> inName g
+  FocusPatternForm g _    -> inName g
   RepeatedInPattern g _   -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
@@ -2464,12 +2754,39 @@ whereRuleError ren e = case e of
     inName g   = "in " ++ nameString ren g ++ ": "
     inSignature n = "in the signature of " ++ n ++ ": "
 
+-- | The same, for a TYPED LINE rather than a rule (MS12 phase 324).
+--
+-- **One reason differs and the rest do not**, which is why this delegates:
+-- 'UnboundInRule' is worded for a rule, and a rule has parameters. A typed line
+-- has none and can never have one, so /no parameter or earlier binding is
+-- called id1/ named something the reader\'s context cannot contain — found from
+-- his own transcript, 2026-11-19. The split follows 'whereRuleError'\'s, made at
+-- MS5 phase 62b for the same reason: a line and a file want the same reasons
+-- said differently.
+whatLineError :: RuleError -> String
+whatLineError e = case e of
+  UnboundInRule _ _ n ty -> "nothing in this line binds " ++ n ++ nameHint ty n
+  _                      -> whatRuleError e
+
+-- | How to write what belongs there, when the position says a name.
+--
+-- **Only for 'Ty.TName'**, and that is the whole of the rule: a bare word is a
+-- reference everywhere in @instral@, and the one position where a reader
+-- plausibly meant a literal instead is the one that wants a name. A @'TCore'@
+-- or @'TString'@ position gets nothing, because quoting the word there would be
+-- a different mistake — @say "m"@ prints the letter @m@.
+nameHint :: Ty -> String -> String
+nameHint ty n = case ty of
+  Ty.TName -> " \8212 a name is written \"" ++ n ++ "\""
+  _     -> ""
+
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
 whatRuleError e = case e of
   DeclarationInBody _ _   -> "a declaration is a command, not a rule-body operation"
   BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
-  UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
+  UnboundInRule _ _ n ty  -> "no parameter or earlier binding is called " ++ n
+                               ++ nameHint ty n
   NoSuchTest _ w          -> "no such test: " ++ w
   -- **The words @:parse@ uses**, from the same renderer, because it is the
   -- same parser and the same grammar (MS6 phase 104c).
@@ -2498,6 +2815,23 @@ whatRuleError e = case e of
       ++ ", so it is ambiguous here"
   BadRegion _ _ tag why   ->
     "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
+  -- **It says what was written and not that the region is wrong**, because
+  -- every one of these forms is a term the development calculus writes and a
+  -- pattern will read at a later landing (MS12 phase 352, @spec\/machine.md@
+  -- §8).
+  CorePatternForm _ what  ->
+    what ++ " is not read in a core pattern yet"
+  CorePatternNotInScope _ w ->
+    w ++ " is not in scope, and a word in a core pattern names a global"
+  CorePatternAmbiguous _ w ls ->
+    w ++ " could be " ++ intercalate " or " (map nameDotted ls)
+      ++ ", so it is ambiguous here"
+  -- **The one position of an @at@ pattern that takes @_@ and nothing else.**
+  -- What stands under a guess is a development and not a term, so the message
+  -- says what is there rather than offering a spelling that would work.
+  FocusPatternForm _ what ->
+    what ++ " cannot stand under a guess's ≐ — write _, and read the"
+      ++ " development with goal"
   UnknownType _ w         -> w ++ " is not a type"
   TypeArity _ w want got  ->
     w ++ " takes " ++ show want ++ ", not " ++ show got
@@ -2570,25 +2904,44 @@ renderPattern pt = case pt of
   PSome a     -> "(some " ++ renderPattern a ++ ")"
   PNone       -> "none"
   PObject sk  -> renderSkeleton renderPattern sk
+  -- **The one pattern form that prints back to the region it was written as**
+  -- (MS12 phase 352): the development calculus needs no grammar to be written,
+  -- so 'Thena.Syntax.Print.corePText' is in the module whose output reads back
+  -- and both display printers call it rather than carrying a copy each.
+  PCore cp    -> corePText renderPattern cp
   PList ps mt ->
     "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
     where tl = case mt of
                  Nothing -> []
                  Just t  -> ["..." ++ renderPattern t]
 
-renderMatches :: Rendering -> [Rule] -> [String]
+renderMatches :: Rendering -> [MatchedRule] -> [String]
 renderMatches _ [] = ["no rule applies here"]
 renderMatches ren rs = map one rs
   where
-    one r = unwords (nameString ren (ruleName r) : map placeholder (ruleParams r))
-    -- **A variable keeps its corners and anything else is shown as written.**
-    -- The corners say /put something here/, which is true of @x@ and false of
-    -- @[a, ...rest]@ — that one says what shape the something must be, and
-    -- hiding it behind a placeholder would make two clauses of one name print
-    -- identically (MS5 phase 82).
+    one r =
+      unwords (nameString ren (matchedName r) : map placeholder (matchedParams r))
+        ++ maybe "" ((" : " ++) . renderSignature) (matchedType r)
+
+    -- **Every parameter gets corners now, whatever the clause wrote there.**
+    -- Until 2026-11-19 a pattern that was not a variable printed as written —
+    -- @reverse-onto [] ‹acc›@ — because a row was one clause and the shape was the
+    -- only thing telling two rows of one name apart. A row is a rule now, so
+    -- there is no second row to tell it from, and the shape belongs to a clause
+    -- this row does not name: printing @[]@ here would say /type an empty list/
+    -- when the other clause takes a cons. **The corners say put something here,
+    -- which is the whole of what a row can honestly promise**, and the type
+    -- beside it says what.
+    --
+    -- A pattern that binds no name has none to show, so it shows what kind of
+    -- thing it is instead — @‹list›@, @‹some›@ — which is still a promise the
+    -- row can keep, since every clause of this arity is behind it.
     placeholder pt = case pt of
-      PVar n -> "‹" ++ n ++ "›"
-      _      -> renderPattern pt
+      PVar n -> corners n
+      _      -> corners (patternKind pt)
+
+    corners n = "‹" ++ n ++ "›"
+
 
 -- | @:choices@ — the live choice points, nearest first (§7.7).
 --
@@ -2596,6 +2949,21 @@ renderMatches ren rs = map one rs
 -- running now, and the ones still untried in dispatch order. Every choice point
 -- listed has something left, which is the peek's invariant (§7.3) and the
 -- reason there is no \"exhausted\" column.
+--
+-- **EVERY ALTERNATIVE CARRIES THE LINE ITS CLAUSE WAS WRITTEN AT** (MS12 phase
+-- 342, @~mhz7j@, his direction of 2026-11-23). The unit being chosen is a
+-- clause and the name belongs to the rule, so a fork between two clauses of one
+-- name printed that name twice and said nothing else — @any-of   untried:
+-- any-of@. The line is what always tells them apart.
+--
+-- **THE FILE'S NAME AND NOT ITS PATH**, and that is deliberate twice over. A
+-- base's 'Thena.Rules.basePath' is absolute by the time it is loaded —
+-- @\/Users\/…\/rules\/standard.thena.rules@ — so a transcript carrying it would
+-- be a transcript of the machine it ran on, and every golden holding a
+-- @:choices@ row would be unportable. The name is also what a person needs: it
+-- tells two bases apart, which a line number alone does not.
+-- 'Thena.View.Choices.altViewPath' hands a frontend the whole path, because a
+-- pane that opens the clause needs it and is not a transcript.
 --
 -- The identifier is minted from the session's name counter, chosen by the user
 -- 2026-08-23, so the numbers are unique and stable but not consecutive — every
@@ -2605,8 +2973,22 @@ renderChoices _ [] = ["no choice points"]
 renderChoices ren cs = map one cs
   where
     one c =
-      show (pointId c) ++ "  " ++ nameString ren (pointRule c)
-        ++ "   untried: " ++ intercalate ", " (map (nameString ren) (pointAlts c))
+      show (pointId c) ++ "  " ++ alt (pointRule c)
+        ++ "   untried: " ++ intercalate ", " (map alt (pointAlts c))
+
+    alt a = nameString ren (altRule a) ++ case altAt a of
+      Nothing -> ""
+      Just o  ->
+        " (" ++ fileNameOf (Ops.originPath o)
+             ++ ":" ++ show (posLine (Ops.originAt o)) ++ ")"
+
+-- | The last segment of a path (MS12 phase 342).
+--
+-- **By hand and not @System.FilePath@**: the library depends on @base@ and the
+-- parsers alone, @filepath@ is a dependency of the TUI executable only, and one
+-- @reverse@ is not worth widening what this package needs.
+fileNameOf :: FilePath -> FilePath
+fileNameOf = reverse . takeWhile (/= '/') . reverse
 
 -- | A definition's prenex level parameters, as a declaration writes them:
 -- @{ℓ₀ ℓ₁}@, and nothing at all when there are none (phase 31b).
@@ -2643,12 +3025,32 @@ sortPhrase ren s = article word
 -- | A reading, as the production names applied to their slots (MS6 phase
 -- 102): @abs(x, base, var(x))@. A class's match is its text, a hole is @?@.
 renderTree :: Earley.Tree -> String
-renderTree t = case t of
-  Earley.Node n [] -> n
-  Earley.Node n cs -> n ++ "(" ++ intercalate ", " (map renderTree cs) ++ ")"
+renderTree = renderTreeIn (rendering [] 0)
+
+-- | __The same, written where the reader stands__ (MS12 phase 313).
+--
+-- **A production's name is the constructor's name**, so it shortens exactly as
+-- any other name does: a language lives under its module's namespace now, and
+-- @Tm.cond(…)@ is what a reader with that module opened writes, where the whole
+-- path @a.b.C.Tm.cond(…)@ is what they would have to write without it.
+-- 'nameString' is the one spelling, asked here as everywhere.
+--
+-- **The node name comes back as text and goes out as text**: the parser is keyed
+-- by the dotted name, so this reads it with 'nameFromText' and keeps it verbatim
+-- where nothing answers — a hand-built rule in a test has no environment and no
+-- scope, which is what 'renderTree' is.
+renderTreeIn :: Rendering -> Earley.Tree -> String
+renderTreeIn ren t = case t of
+  Earley.Node n [] -> word n
+  Earley.Node n cs ->
+    word n ++ "(" ++ intercalate ", " (map (renderTreeIn ren) cs) ++ ")"
   Earley.Token x -> x
   Earley.PlaceholderAt _ -> [Earley.placeholderChar]
   Earley.SpliceOf k -> "${" ++ show k ++ "}"
+  where
+    word n = case nameString ren (nameFromText n) of
+      "" -> n
+      w  -> w
 
 -- | Why a tagged term literal is not one term of its language. Shared by the
 -- surface's reader and the development calculus's (MS6 phase 110), so a region
@@ -2671,7 +3073,7 @@ renderObjectError e = case e of
   -- way and the writer has reached for the wrong one (MS10 phase 266).
   BuiltInTagNotATerm tag ->
     tag ++ "`\8230` is not a term of the development calculus, so it cannot be"
-        ++ " written here \8212 only core`\8230` can"
+        ++ " written here — only core`\8230` can"
   CoreRegionUnread tag why -> "in " ++ tag ++ "`\8230`: " ++ renderSyntaxError why
   RegionSpliceNotAName tag ->
     "in " ++ tag ++ "`\8230`: an escape here holds a name and nothing else,"
@@ -2680,24 +3082,51 @@ renderObjectError e = case e of
 -- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
 -- language and the text first, as a tagged literal would be written.
 renderUnparsed :: String -> String -> Earley.ParseFailure -> String
-renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReason text why
+renderUnparsed = renderUnparsedIn (rendering [] 0)
+
+-- | __The same, where the reader stands__ (MS12 phase 313).
+--
+-- **A reading names productions, and a production's name is under its module's
+-- namespace now** — so a reader with that module open sees @app(var(f), …)@
+-- where a caller with no scope has to write the whole path. 'renderTreeIn' is
+-- the shortening and this is the one message that has a reader to shorten for:
+-- @:parse@ answers a line somebody typed. **The block and rule-file refusals
+-- keep 'renderUnparsed'**, having no scope to offer — they are about a file,
+-- not about a prompt.
+renderUnparsedIn :: Rendering -> String -> String -> Earley.ParseFailure -> String
+renderUnparsedIn ren lang text why =
+  "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReasonIn ren text why
 
 -- | Why a text did not parse, without saying which text.
 parseFailureReason :: String -> Earley.ParseFailure -> String
-parseFailureReason text why = case why of
+parseFailureReason = parseFailureReasonIn (rendering [] 0)
+
+parseFailureReasonIn :: Rendering -> String -> Earley.ParseFailure -> String
+parseFailureReasonIn ren text why = case why of
   Earley.Ambiguous a b ->
-    "this term parses two ways, as " ++ renderTree a ++ " and as " ++ renderTree b
+    "this term parses two ways, as " ++ renderTreeIn ren a
+      ++ " and as " ++ renderTreeIn ren b
+  -- **The production is named as the reader writes it too** — it is the
+  -- parser's dotted key, which is the production's own name.
   Earley.Disagrees r x a b ->
-    r ++ "'s " ++ x ++ " is written more than once and must read the same each time, "
-      ++ "but here it is " ++ renderTree a ++ " and " ++ renderTree b
+    spelled r ++ "'s " ++ x
+      ++ " is written more than once and must read the same each time, "
+      ++ "but here it is " ++ renderTreeIn ren a ++ " and " ++ renderTreeIn ren b
   Earley.Unbounded h ->
-    "this term parses without end, because " ++ h ++ " can derive itself from the same text"
+    "this term parses without end, because " ++ spelled h
+      ++ " can derive itself from the same text"
   Earley.Stuck p expected
     | p >= length text -> "the term ends too soon" ++ expecting expected
     | otherwise ->
         "unexpected " ++ escapeChar (text !! p) ++ " at character " ++ show (p + 1)
           ++ expecting expected
   where
+    -- A production's key, as the reader writes it: the shortest ending that
+    -- still means it ('renderTreeIn''s own move, for a name that arrives as
+    -- text rather than in a tree).
+    spelled n = case nameString ren (nameFromText n) of
+      "" -> n
+      w  -> w
     expecting [] = ""
     -- **BY THE TEXT, SO TWO SYMBOLS SPELLED ALIKE ARE SAID ONCE** (2026-11-10).
     -- A class's qualified substitution puts a terminal and a name slot of the
@@ -2708,7 +3137,11 @@ parseFailureReason text why = case why of
     symbolText s = case s of
       Earley.Literal x -> x
       Earley.Scan n _ -> n
-      Earley.Nonterminal n -> n
+      -- **A NONTERMINAL IS A KEY, SO IT IS SPELLED — MS12 phase 313.** The
+      -- parser is keyed by a grammar's own name, which carries the module's
+      -- namespace since that phase, and @expecting Printing.LC@ named a
+      -- language by a path the reader never wrote.
+      Earley.Nonterminal n -> spelled n
     oneOf ws = case reverse ws of
       [w] -> w
       w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w

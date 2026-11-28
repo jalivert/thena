@@ -207,7 +207,7 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive (rendering [] 0) d
+              , l <- renderInductive (rendering [] 0) d []
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
@@ -613,7 +613,7 @@ roundTripTests =
       -- what a round trip is: the printer writes the shortest ending that still
       -- resolves, so printing with no scope and reading with one would be two
       -- different questions. @data Nat.Nat@ prints @data Nat@ here.
-      Just d  -> case reread (renderInductive (renderingFor [] natVecCounter natVec (opensIn natVec)) d) of
+      Just d  -> case reread (renderInductive (renderingFor [] natVecCounter natVec (opensIn natVec)) d []) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d

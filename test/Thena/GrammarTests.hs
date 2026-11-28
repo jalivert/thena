@@ -24,9 +24,10 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), GlobalName (..), rootName, nameDotted)
-import Thena.Declared (declaredAs, named)
+import Thena.Declared (named)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , RuleFileError (..)
   , Session
   , command
@@ -62,7 +63,7 @@ tests =
     , goldenVsString "grammars" "test/golden/grammars.golden" $ do
         (s0, trouble) <- startingSession
         let run (title, src) =
-              let (s1, r) = loadProofSource s0 src
+              let (s1, r) = loadProofSource Strict s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
           (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
@@ -89,7 +90,7 @@ scoped =
     -- **Refused and not chosen**, as every other two-answer lookup is.
   , refusal "two open languages that both use e is refused, naming both"
       (expr "e" ++ code "e" ++ ["open Expr", "open Code", ""] ++ judgment "e" "e")
-      ("refused: in the judgment compiles: e is a metavariable of Code and Expr, "
+      ("refused: in the judgment compiles: e is a metavariable of Scoped.Code and Scoped.Expr, "
          ++ "all in scope here; open one renaming it")
     -- **The tie-break is @open … renaming@**, and it needed nothing new.
   , accepted "and a renaming settles it"
@@ -100,11 +101,11 @@ scoped =
     -- metavariable is a terminal), so it is a warning and not a refusal.
   , testCase "a letter whose language is shut is a terminal, and warns" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines (["module Shut where", ""]
+      case loadProofSource Strict s0 (unlines (["module Shut where", ""]
              ++ ["language Ty, T, S where", "  base  -> \953", "  arrow -> ( T -> S )", ""]
              ++ ["language LC, M where", "  app -> ( M M )", "  ty  -> ( T )"])) of
         (_, ProofLoaded _ _ _ ws) ->
-          ws @?= [ MetavariableNotOpen LanguageBlock "LC" "ty" "T" "Ty" ]
+          ws @?= [ MetavariableNotOpen LanguageBlock "LC" "ty" "T" "Shut.Ty" ]
         (_, other) -> assertFailure (show other)
 
     -- **A BLOCK MAY BE WRITTEN INSIDE A @namespace@ BLOCK — MS10 PHASE 258.**
@@ -113,7 +114,7 @@ scoped =
     -- scoping: the metavariable half was phase 255.
   , testCase "all four block kinds declare inside a namespace" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 blocksInANamespace of
+      case loadProofSource Strict s0 blocksInANamespace of
         (_, ProofLoaded _ ds _ _) ->
           ds @?= ["A.x", "A.Ty", "A.LC", "A.Ctx", "A.typing"]
         (_, other) -> assertFailure (show other)
@@ -122,19 +123,24 @@ scoped =
     -- minted relative to the namespace and the declaring op supplies the
     -- prefix, so an absolute mint would have landed at @A.A.LC.subst.A.x@.
     --
-    -- **THE CLASS'S PATH IS ABSOLUTE INSIDE THE FAMILY** (his ruling of
-    -- 2026-11-10), so a class in the same namespace as the language repeats
-    -- that namespace: @A.LC.subst.A.x@ for @A.x@. Relative would need a
-    -- relative-to-what, and the shortest-ending printer is what a reader
-    -- actually sees.
+    -- **THE CLASS IS NAMED AFTER THE LANGUAGE AND NOT BEFORE IT** (MS12 phase
+    -- 313, 'Thena.Language.Grammar.classIn'): the steps the language's own name
+    -- has already said are not said again, so @A.x@ inside @A.LC@ gives
+    -- @A.LC.subst.x@. His ruling of 2026-11-10 spells the family
+    -- @Compiles.subst.Source.x@ — the class's name after the language — and
+    -- from this phase a module's declarations live under the module's name, so
+    -- repeating the shared steps would have made that ruling's own example
+    -- @Two.Compiles.subst.Two.Source.x@ and the printer's promised @subst.x@
+    -- unreachable. A class the language does NOT share a prefix with is
+    -- unchanged, which is the case that distinction exists for.
   , testCase "and a language's substitution is placed under the namespace" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 blocksInANamespace
+      let (s1, _) = loadProofSource Strict s0 blocksInANamespace
           env = globals (machineOf s1)
-      ( isDeclared (named "A.LC.subst.A.x") env
-        , isDeclared (named "A.LC.fv.A.x") env
-        , isDeclared (named "A.A.LC.subst.A.x") env
-        , isDeclared (named "LC.subst.A.x") env ) @?= (True, True, False, False)
+      ( isDeclared (named "NSAll.A.LC.subst.x") env
+        , isDeclared (named "NSAll.A.LC.fv.x") env
+        , isDeclared (named "NSAll.A.LC.subst.A.x") env
+        , isDeclared (named "NSAll.LC.subst.x") env ) @?= (True, True, False, False)
 
     -- **A COMMA LIST REACHES THE OWNING LANGUAGE BY ITS KEY, NOT ITS WORD**
     -- (2026-11-10). The pair rule a rule's grammar gets per class names the
@@ -148,7 +154,7 @@ scoped =
     -- 'Thena.Language.Judgment.ownerKey'.
   , testCase "a comma list parses for a language inside a namespace" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              [ "module Swap where", ""
              , "namespace A where"
              , "  x : Token String"
@@ -177,19 +183,19 @@ scoped =
       (s0, _) <- startingSession
       s <- either assertFailure pure (loadOrSay s0 oneWordTwoClasses)
       said s ":parse Compiles ( a ~> b ) [ Source.x: y -> c ]"
-        @?= [ "Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c))" ]
+        @?= [ "subst.Source.x(step(var(a), ref(b)), y, var(c))" ]
       said s ":parse Compiles ( a ~> b ) [ Target.x: y -> c ]"
-        @?= [ "Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+        @?= [ "subst.Target.x(step(var(a), ref(b)), y, ref(c))" ]
       -- **The bare spelling is still two readings here, and that is what the
       -- qualifier is for** — not a defect left behind. It names both.
       said s ":parse Compiles ( a ~> b ) [ y -> c ]"
-        @?= [ "in Compiles`( a ~> b ) [ y -> c ]`: this term parses two ways, as Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c)) and as Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+        @?= [ "in Compiles`( a ~> b ) [ y -> c ]`: this term parses two ways, as subst.Source.x(step(var(a), ref(b)), y, var(c)) and as subst.Target.x(step(var(a), ref(b)), y, ref(c))" ]
       -- **And a comma list qualifies each pair**, so the simultaneous
       -- substitution gets one list per class with that class's pair in it —
       -- where before the second class's language could not appear in a pair at
       -- all and the two lists were keyed by the one word.
       drop 1 (said s ":show ok")
-        @?= [ "  { ok.R-both : ∀ (C : Compiles) (x : String) (N : LC) (P : Mach) -> ok`${Compiles.subst-* {0 0 0 0 0 0} C (cons {0} (And {0 0} String LC) (both {0 0} String LC x N) (nil {0} (And {0 0} String LC))) (cons {0} (And {0 0} String Mach) (both {0 0} String Mach x P) (nil {0} (And {0 0} String Mach)))} good` }" ]
+        @?= [ "  { ok.R-both : ∀ {C : Compiles} {x : String} {N : LC} {P : Mach} -> ok`${Compiles.subst-* {0 0 0 0 0 0} C (cons {0} (And {0 0} String LC) (both {0 0} String LC x N) (nil {0} (And {0 0} String LC))) (cons {0} (And {0 0} String Mach) (both {0 0} String Mach x P) (nil {0} (And {0 0} String Mach)))} good` }" ]
 
     -- **A block's own word opens where it is written** (MS10 phase 258): the
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
@@ -201,7 +207,7 @@ scoped =
     -- letter — and gets the same warning, naming the class in full.
   , testCase "a class in a closed namespace is read as a terminal, with a warning" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              [ "module Shut where", ""
              , "namespace B where"
              , "  x : Token String"
@@ -214,7 +220,7 @@ scoped =
              , "" ]) of
         (_, ProofLoaded _ ds _ ws) -> do
           ds @?= ["B.x", "A.LC"]
-          ws @?= [ TokenClassNotOpen LanguageBlock "LC" "idx" "x" "B.x" ]
+          ws @?= [ TokenClassNotOpen LanguageBlock "LC" "idx" "x" "Shut.B.x" ]
         (_, other) -> assertFailure (show other)
 
     -- **AN @open@ REACHES TO THE END OF THE BLOCK IT IS WRITTEN IN — HIS
@@ -227,7 +233,7 @@ scoped =
     -- metavariables, so the required shape was the leaking one.
   , testCase "two namespaces may both hold a language of one word" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 twoNamespacesOneWord of
+      case loadProofSource Strict s0 twoNamespacesOneWord of
         (_, ProofLoaded _ ds _ ws) -> (ds, ws) @?= (["A.Ty", "B.Ty"], [])
         (_, other) -> assertFailure (show other)
 
@@ -236,7 +242,7 @@ scoped =
     -- language at all — where a term of each is still written by its path.
   , testCase "and the word that each block opened is shut again after it" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 twoNamespacesOneWord
+      let (s1, _) = loadProofSource Strict s0 twoNamespacesOneWord
           ask t = last (said s1 (":infer " ++ t))
       ( ask "A.Ty`\956`", ask "B.Ty`\959`", ask "Ty`\956`" ) @?=
         ( "A.Ty`\956` : A.Ty.Ty"
@@ -249,7 +255,7 @@ scoped =
     -- with an @open A@ written at the file's level answer the bare word.
   , testCase "a file-level open is not popped, so the bare word resolves" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (twoNamespacesOneWord ++ "\nopen A\n")
+      let (s1, _) = loadProofSource Strict s0 (twoNamespacesOneWord ++ "\nopen A\n")
       -- **And the TYPE shortens too**, which is the same open read back by
       -- the printer: @A.Ty.Ty@ spells as @Ty@ while the open is live, where the
       -- test above printed it whole with both blocks shut.
@@ -265,7 +271,7 @@ scoped =
     -- is exercised and not merely accepted.
   , testCase "a language reaches a class in another namespace with only its own open" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 classAcrossANamespace of
+      case loadProofSource Strict s0 classAcrossANamespace of
         (_, ProofLoaded _ ds _ ws) ->
           (ds, ws) @?= (["Source.x", "Source.LC", "Wrap", "swapped"], [])
         (_, other) -> assertFailure (show other)
@@ -277,11 +283,11 @@ scoped =
     -- dropped, and `~ps4c7` is the item that ruling closed.
   , testCase "and the generated family hangs off the reached class's path" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 classAcrossANamespace
+      let (s1, _) = loadProofSource Strict s0 classAcrossANamespace
           env = globals (machineOf s1)
-      ( isDeclared (named "Wrap.subst.Source.x") env
-        , isDeclared (named "Wrap.fv.Source.x") env
-        , isDeclared (named "Wrap.subst.x") env ) @?= (True, True, False)
+      ( isDeclared (named "Notate.Wrap.subst.Source.x") env
+        , isDeclared (named "Notate.Wrap.fv.Source.x") env
+        , isDeclared (named "Notate.Wrap.subst.x") env ) @?= (True, True, False)
 
     -- **TWO CLASSES OF ONE WORD ARE ACCEPTED — HIS RULING OF 2026-11-10,
     -- `~ps4c7`.** They were refused from MS10 phase 259 until phase 304,
@@ -291,16 +297,17 @@ scoped =
     -- there is nothing to refuse. **This is the file the item was measured on.**
   , testCase "one language reaching two classes of one word is accepted" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 twoClassesOneWord
+      let (s1, r) = loadProofSource Strict s0 twoClassesOneWord
       case r of
         ProofLoaded _ ds _ _ -> do
           ds @?= ["B.x", "B.L1", "C.x", "C.L2", "Top"]
           let env = globals (machineOf s1)
-          ( isDeclared (named "Top.subst.B.x") env
-            , isDeclared (named "Top.subst.C.x") env
-            , isDeclared (named "Top.fv.B.x") env
-            , isDeclared (named "Top.fv.C.x") env
-            , isDeclared (named "Top.subst-*") env ) @?= (True, True, True, True, True)
+          ( isDeclared (named "Twice.Top.subst.B.x") env
+            , isDeclared (named "Twice.Top.subst.C.x") env
+            , isDeclared (named "Twice.Top.fv.B.x") env
+            , isDeclared (named "Twice.Top.fv.C.x") env
+            , isDeclared (named "Twice.Top.subst-*") env )
+            @?= (True, True, True, True, True)
         _ -> assertFailure (unlines (renderResponse s1 r))
 
     -- **AND THE BRACKET NOTATION OF THOSE TWO IS AMBIGUOUS — `~5659b`, OPEN.** The
@@ -311,10 +318,11 @@ scoped =
     -- regression, and so a fix has something to change.
   , testCase "but the bracket notation of two classes of one word is ambiguous" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 twoClassesOneWord
+      let (s1, _) = loadProofSource Strict s0 twoClassesOneWord
           out = last (said s1 ":parse Top ( a , b ) [ y -> c ]")
       assertBool out ("parses two ways" `isInfixOf` out)
-      assertBool out ("Top.subst.B.x" `isInfixOf` out && "Top.subst.C.x" `isInfixOf` out)
+      assertBool out ("Top.subst.B.x" `isInfixOf` out
+                        && "Top.subst.C.x" `isInfixOf` out)
 
     -- **A TOKEN CLASS MAY BE CALLED `all` — `~xrq7t`, phase 304.** It could not before:
     -- the simultaneous substitution was @L.subst-all@ and the per-class one was
@@ -325,7 +333,7 @@ scoped =
     -- declared, it computes.
   , testCase "a token class may be called all, and its substitution computes" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              [ "module AllClass where", ""
              , "all : Token String"
              , "all = /[a-z][a-zA-Z0-9']*/"
@@ -341,8 +349,8 @@ scoped =
         (s1, ProofLoaded _ ds _ _) -> do
           ds @?= ["all", "LC", "replaces"]
           let env = globals (machineOf s1)
-          ( isDeclared (named "LC.subst-*") env
-            , isDeclared (named "LC.subst.all") env ) @?= (True, True)
+          ( isDeclared (named "AllClass.LC.subst-*") env
+            , isDeclared (named "AllClass.LC.subst.all") env ) @?= (True, True)
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
 
     -- **A TAG RESOLVES LIKE ANY OTHER NAME — MS10 PHASE 260, `~zjkvd`, HIS
@@ -352,7 +360,7 @@ scoped =
     -- qualified one did not lex. Four readings, in one load.
   , testCase "a tag resolves by the walk, qualified or bare, inside or after open" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              [ "module Tags where", ""
              , "namespace A where"
              , "  x : Token String"
@@ -404,10 +412,10 @@ scoped =
               , "renamed : A.LC"
               , "renamed = Lam" ++ region "( y y )"
               , "" ] ++ extra)
-      case loadProofSource s0 (src []) of
+      case loadProofSource Strict s0 (src []) of
         (_, ProofLoaded _ ds _ _) -> ds @?= ["x", "A.LC", "renamed"]
         (_, other) -> assertFailure (show other)
-      let (s1, r) = loadProofSource s0
+      let (s1, r) = loadProofSource Strict s0
                       (src ["gone : A.LC", "gone = LC" ++ region "( y y )", ""])
       case r of
         ProofLoaded {} -> assertFailure "the renamed-away word still named the language"
@@ -419,7 +427,7 @@ scoped =
     -- the path. `~7x8rt` owns the wording of a scoping refusal.
   , testCase "two opened namespaces offering one tag is ambiguous" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines
+      let (s1, r) = loadProofSource Strict s0 (unlines
              [ "module Ambiguous where", ""
              , "namespace A where"
              , "  language Ty where"
@@ -438,11 +446,11 @@ scoped =
       case r of
         ProofLoaded {} -> assertFailure "an ambiguous tag was accepted"
         _ -> last (renderResponse s1 r) @?=
-               "stuck: Ty could be B.Ty or A.Ty, so it is ambiguous here"
+               "stuck: Ty could be Ambiguous.B.Ty or Ambiguous.A.Ty, so it is ambiguous here"
 
   , testCase "and a namespace resolves by the walk, so open Ty works inside A" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              [ "module Opens where", ""
              , "namespace A where"
              , "  language Ty, T where"
@@ -554,7 +562,7 @@ scoped =
 
     loads body = do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (["module Scoped where", ""] ++ body))
+      let (s1, r) = loadProofSource Strict s0 (unlines (["module Scoped where", ""] ++ body))
       pure $ case r of
         ProofLoaded _ names _ _ -> Right names
         _                       -> Left (last (renderResponse s1 r))
@@ -671,7 +679,7 @@ lamByBlock =
     ]
 
 loadOrSay :: Session -> String -> Either String Session
-loadOrSay s0 src = case loadProofSource s0 src of
+loadOrSay s0 src = case loadProofSource Strict s0 src of
   (s1, ProofLoaded {}) -> Right s1
   (s1, other) -> Left (last (renderResponse s1 other))
 
@@ -739,7 +747,7 @@ validSource =
     ]
 
 loadProofSession :: Session -> Either String Session
-loadProofSession s0 = case loadProofSource s0 validSource of
+loadProofSession s0 = case loadProofSource Strict s0 validSource of
   (s1, ProofLoaded {}) -> Right s1
   (s1, other) -> Left (unlines (renderResponse s1 other))
 
@@ -926,7 +934,7 @@ meaning :: [TestTree]
 meaning =
   [ testCase "the module loads, with the vacuous binder's warning" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 stlc of
+      case loadProofSource Strict s0 stlc of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "Ty", "LC", "Ctx"]
           -- **One warning, and it used to be two** (MS9 phase 212). The second
@@ -939,20 +947,20 @@ meaning =
         (_, other) -> assertFailure (show other)
   , testCase "the arguments and roles of LC, production by production" $ do
       gs <- installed stlc
-      case [ g | g <- gs, grammarName g == rootName "LC" ] of
+      case [ g | g <- gs, grammarName g == named "STLC.LC" ] of
         [g] ->
           -- **The datatype's constructors, so `constructorProductions`** — since
           -- MS8 phase 159 the grammar also carries the generated @E[x -> N]@
           -- notation, which is a function production and asserted below.
           map (\p -> (gproductionName p, gproductionArguments p)) (constructorProductions g)
-            @?= [ (named "LC.var", [Argument "x" str (Occurrence (rootName "x"))])
-                , (named "LC.abs", [ Argument "x" str (Binder (rootName "x"))
+            @?= [ (named "STLC.LC.var", [Argument "x" str (Occurrence (named "STLC.x"))])
+                , (named "STLC.LC.abs", [ Argument "x" str (Binder (named "STLC.x"))
                                      , Argument "T" (lang "Ty") Plain
                                      , Argument "E" (lang "LC") (Scope [0]) ])
-                , (named "LC.app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
+                , (named "STLC.LC.app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
                   -- §4.3: a name written twice is one argument.
-                , (named "LC.repeat", [Argument "M" (lang "LC") Plain])
-                , (named "LC.vacuous", [ Argument "x" str (Binder (rootName "x"))
+                , (named "STLC.LC.repeat", [Argument "M" (lang "LC") Plain])
+                , (named "STLC.LC.vacuous", [ Argument "x" str (Binder (named "STLC.x"))
                                          , Argument "M" (lang "LC") Plain
                                          , Argument "N" (lang "LC") Plain ])
                 ]
@@ -972,7 +980,7 @@ meaning =
     -- what lets a rule write @x@ there.
   , testCase "generated substitution declares its own notation" $ do
       gs <- installed stlc
-      case [ g | g <- gs, grammarName g == rootName "LC" ] of
+      case [ g | g <- gs, grammarName g == named "STLC.LC" ] of
         [g] -> do
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
@@ -981,14 +989,14 @@ meaning =
             -- which is the only thing in either production that says which
             -- class is substituted for; here the class is at the top level, so
             -- that terminal is the bare @x@ and the slot beside it reads a name.
-            @?= [ ( GlobalName ["LC", "subst"] "x"
+            @?= [ ( GlobalName ["STLC", "LC", "subst"] "x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Slot "x" str []
                     , Terminal "->"
                     , Slot "n" (lang "LC") []
                     , Terminal "]" ] )
-                , ( GlobalName ["LC", "subst"] "x"
+                , ( GlobalName ["STLC", "LC", "subst"] "x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Terminal "x"
@@ -999,9 +1007,10 @@ meaning =
                     , Terminal "]" ] ) ]
           -- Nothing of it reaches the datatype: §4.8's whole mechanism.
           map gproductionName (constructorProductions g)
-            @?= map named [ "LC.var", "LC.abs", "LC.app"
-                          , "LC.repeat", "LC.vacuous"
-                          ]
+            @?= map (named . ("STLC." ++))
+                    [ "LC.var", "LC.abs", "LC.app"
+                    , "LC.repeat", "LC.vacuous"
+                    ]
         other -> assertFailure (show (length other) ++ " grammars called LC")
     -- **A context gets one too**, and `ContextTests` is where it is asserted:
     -- it needs a context that /reaches/ a class, which this fixture's @Ctx@ does
@@ -1012,13 +1021,13 @@ meaning =
     -- generator can tell them apart, which phase 155 is what needs it.
   , testCase "a binder at a second class is recorded at that class" $ do
       gs <- installed twoClasses
-      case [ g | g <- gs, grammarName g == rootName "L" ] of
+      case [ g | g <- gs, grammarName g == named "Two.L" ] of
         [g] ->
           [ (gproductionName p, map argumentRole (gproductionArguments p))
           | p <- constructorProductions g ]
-            @?= [ (named "L.var", [Occurrence (rootName "x")])
-                , (named "L.abs", [Binder (rootName "x"), Scope [0]])
-                , (named "L.big", [Binder (rootName "X"), Scope [0]])
+            @?= [ (named "Two.L.var", [Occurrence (named "Two.x")])
+                , (named "Two.L.abs", [Binder (named "Two.x"), Scope [0]])
+                , (named "Two.L.big", [Binder (named "Two.X"), Scope [0]])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called L")
     -- **It installs and says nothing** (MS8 phase 155). It used to warn: the
@@ -1028,7 +1037,7 @@ meaning =
     -- that binder is never renamed — the case is correct rather than said.
   , testCase "and the block installs, with nothing to say about the second class" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 twoClasses of
+      case loadProofSource Strict s0 twoClasses of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "X", "L"]
           ws @?= []
@@ -1040,7 +1049,7 @@ meaning =
     -- foreign one as written.
   , testCase "a binder free in another language's slot installs, and nothing is owed" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 foreignScope of
+      case loadProofSource Strict s0 foreignScope of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "X", "P", "L"]
           ws @?= []
@@ -1054,7 +1063,7 @@ meaning =
     -- one the first module wrote.
   , testCase "a module may use an imported module's metavariables" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/BorrowsMetavars.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/BorrowsMetavars.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Metavars", "test.modules.BorrowsMetavars"]
@@ -1070,19 +1079,44 @@ meaning =
                   [("t.thena.rules", "rule base t where\nlanguage Tm where { var : name }\n")]) of
         RuleFileRefused _ (RuleSyntaxError _) -> pure ()
         other -> assertFailure (show other)
-  , testCase "and may not declare a language of the same name" $ do
+    -- **TWO MODULES MAY EACH DECLARE A LANGUAGE CALLED @LC@ — MS12 PHASE
+    -- 313.** A module's declarations live under the name its header gives it,
+    -- so these are @STLC.LC@ and @Again.LC@ and neither is the other. Before
+    -- that phase every module declared at the root, the second block's name was
+    -- the first block's name, and the second module was refused — which is what
+    -- this test used to assert.
+    --
+    -- **The bare word is then an ambiguity, not a refusal of the module**, and
+    -- that is the general rule: a name reachable two ways is refused where it is
+    -- /written/, naming both (his ruling of 2026-10-30).
+  , testCase "a second module may declare a language of the same word" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 stlc
-      case loadProofSource s1 "module Again where\n\nlanguage LC, P where\n  f -> P\n" of
-        (_, Ran _ _ (Refused (GrammarRefused e))) -> e @?= GrammarError LanguageBlock "LC" NameTaken
+      let (s1, _) = loadProofSource Strict s0 stlc
+      case loadProofSource Strict s1 "module Again where\n\nlanguage LC, P where\n  f -> P\n" of
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("Again", ["LC"])
+        (_, other) -> assertFailure (show other)
+    -- **And one module may not declare it twice**, which is where the clash
+    -- now lives: the second block's datatype is the first block's datatype.
+  , testCase "but one module may not declare it twice" $ do
+      (s0, _) <- startingSession
+      case loadProofSource Strict s0 (unlines
+             [ "module Twice where", ""
+             , "language LC, P where"
+             , "  f -> P", ""
+             , "language LC, Q where"
+             , "  g -> Q" ]) of
+        (_, Ran _ _ (Refused (GrammarRefused e))) ->
+          e @?= GrammarError LanguageBlock "LC" NameTaken
         (_, other) -> assertFailure (show other)
   ]
   where
-    str = OfClass (rootName "x") (rootName "String") (regex "[a-z][a-zA-Z0-9']*")
-    lang = OfLanguage . rootName
+    -- **Under the @stlc@ fixture's own module namespace** (MS12 phase 313):
+    -- the fixture is @module STLC where@.
+    str = OfClass (named "STLC.x") (rootName "String") (regex "[a-z][a-zA-Z0-9']*")
+    lang = OfLanguage . named . ("STLC." ++)
     installed src = do
       (s0, _) <- startingSession
-      pure (grammars (machineOf (fst (loadProofSource s0 src))))
+      pure (grammars (machineOf (fst (loadProofSource Strict s0 src))))
 
 -- ---------------------------------------------------------------------------
 
@@ -1146,7 +1180,7 @@ notating =
       -- ran. Here the sorts are what the checker recorded.
       let gs = grammars (machineOf s1)
       map argumentSort (concat [ gproductionArguments p
-                               | g <- gs, grammarName g == rootName "Imp"
+                               | g <- gs, grammarName g == named "U.Imp"
                                , p <- grammarProductions g ])
         @?= [OfUniverse 0, OfUniverse 0]
     -- **A universe slot is refused where the argument types are generated FROM
@@ -1182,7 +1216,7 @@ notating =
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)
-                                                         , grammarName g == rootName "Lam" ])
+                                                         , grammarName g == named "Lam.Lam" ])
         -- Three constructors, and the two 'Function's are the generated
         -- substitution's own notation block (phase 159) — so the equipment
         -- arrived with its spelling, exactly as a @language@ block's does.
@@ -1210,7 +1244,7 @@ notating =
         , "notation Ctx where"
         , "  extend : x as occurrence -> ⟪ Γ , x , T ⟫", "" ])
         @?= Left ("refused: in the notation for Ctx, production extend: a role belongs to the "
-                    ++ "block that installs the grammar, and Ctx's is installed already, with "
+                    ++ "block that installs the grammar, and E.Ctx's is installed already, with "
                     ++ "its substitution generated from the roles it had then")
     -- **The family is generated FROM THE GRAMMAR**, so a constructor with no
     -- production would get no method and the generated @elim@ would be one
@@ -1230,7 +1264,7 @@ notating =
         , "notation D where"
         , "  dOne (v : x) : v as occurrence -> ⟨ v ⟩", "" ])
         @?= Left ("refused: in the notation for D: it declares a role, so it generates D's "
-                    ++ "substitution from these productions — and D.dTwo is a constructor of D "
+                    ++ "substitution from these productions — and D.D.dTwo is a constructor of D "
                     ++ "that no production spells")
   , -- **THE HEADER FORM GIVES A DECLARED NAME ITS OWN SPELLING, AND THE NAME
     -- NEED NOT BE A GRAMMAR** (MS8 phase 160, `~hwxrx`, and it closes `~wkv37`).
@@ -1250,14 +1284,14 @@ notating =
         Left e -> assertFailure e
         Right s1 -> do
           let gs = grammars (machineOf s1)
-          v <- case [ g | g <- gs, grammarName g == rootName "Valid" ] of
+          v <- case [ g | g <- gs, grammarName g == named "V.Valid" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called Valid")
           -- One production, the type former's own spelling, named after it.
           map (\p -> (gproductionName p, gproductionKind p)) (grammarProductions v)
-            @?= [(named "Valid.Valid", TypeFormer)]
+            @?= [(named "V.Valid.Valid", TypeFormer)]
           map argumentSort (concatMap gproductionArguments (grammarProductions v))
-            @?= map (OfLanguage . rootName) ["Ctx", "LC", "Ty", "typing"]
+            @?= map (OfLanguage . named . ("V." ++)) ["Ctx", "LC", "Ty", "typing"]
           -- And the constructor's target prints in it: a judgment over a
           -- judgment, spelled.
           said s1 ":show Valid" !! 1
@@ -1272,17 +1306,17 @@ notating =
     -- at all and @twin@ would have been @twin : C@.
     testCase "a slot may be a metavariable's name with a suffix" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  join a b -> ⟦ a , b ⟧") of
+      case loadProofSource Strict s0 (joiningWith "notation C where\n  join a b -> ⟦ a , b ⟧") of
         (s1, ProofLoaded {}) -> do
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == named "Joining.C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           -- Two parameters, both at @C@ because that is what @join@ takes.
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == rootName "join" ]
-            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
-                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
+                                       , gproductionName p == named "Joining.join" ]
+            @?= [[ Argument "a" (OfLanguage (named "Joining.C")) Plain
+                 , Argument "b" (OfLanguage (named "Joining.C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A refusal that quotes a type may not print a nameless argument.** The
     -- stand-in 'functionShape' peels a telescope with used to be a global with
@@ -1293,7 +1327,7 @@ notating =
     -- case went unseen until a notation block named it.
     testCase "a result that mentions an argument names it" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  List.nil a b -> a \8746 b") of
+      case loadProofSource Strict s0 (joiningWith "notation C where\n  List.nil a b -> a \8746 b") of
         (_, Ran _ _ (Refused (GrammarRefused
              (GrammarError _ _ (InProduction "List.nil" (FunctionResult r)))))) -> case r of
           Canonical _ _ [a] -> a @?= Global (rootName "\8249A\8250") []
@@ -1301,27 +1335,28 @@ notating =
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "the block installs, declares nothing, and adds one production" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b") of
+      case loadProofSource Strict s0 (joiningWith "notation C where\n  join a b -> a \8746 b") of
         (s1, ProofLoaded _ names _ _) -> do
           -- @join@ is the definition's own name; the block declares nothing.
           names @?= ["x", "Ty", "C", "join"]
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == named "Joining.C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           map gproductionName (grammarProductions c)
-            @?= [named "C.e", named "C.ext", rootName "join"]
+            @?= [named "Joining.C.e", named "Joining.C.ext", named "Joining.join"]
           map gproductionKind (grammarProductions c)
             @?= [Constructor, Constructor, Function]
           -- **The datatype is the one it was**, which is the whole reason this
           -- is not the refused joining constructor: @C@ stays a list.
-          map gproductionName (constructorProductions c) @?= map named ["C.e", "C.ext"]
+          map gproductionName (constructorProductions c)
+            @?= map named ["Joining.C.e", "Joining.C.ext"]
           -- Plain arguments, in the parameter list's order, at the types the
           -- declaration gives them (MS8 phase 171).
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == rootName "join" ]
-            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
-                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
+                                       , gproductionName p == named "Joining.join" ]
+            @?= [[ Argument "a" (OfLanguage (named "Joining.C")) Plain
+                 , Argument "b" (OfLanguage (named "Joining.C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
     -- **The term is written in the same module as the block** (MS11 phase 282,
     -- @~xdt8c@). It was a second module loaded into the session the first one
@@ -1332,7 +1367,7 @@ notating =
       (s0, _) <- startingSession
       -- @join a b = a@, so the right-hand context is dropped: the notation
       -- elaborated to the function and the function ran.
-      case loadProofSource s0
+      case loadProofSource Strict s0
              (joiningWith
                 ("notation C where\n  join a b -> a \8746 b\n\n"
                    ++ "j : Eq C C`\183 , x : o \8746 \183` (ext e \"x\" base)\n"
@@ -1346,7 +1381,7 @@ notating =
     -- names declared.
   , testCase "the names a module declares are the same with the block and without" $ do
       (s0, _) <- startingSession
-      let declared src = case loadProofSource s0 src of
+      let declared src = case loadProofSource Strict s0 src of
             (_, ProofLoaded _ ns _ _) -> Right ns
             (s1, other) -> Left (unlines (renderResponse s1 other))
       without <- pure (declared joining)
@@ -1360,7 +1395,7 @@ notating =
   , testCase "a judgment rule writes it in an index position" $ do
       (s0, _) <- startingSession
       -- One module, for the reason the test above it gives.
-      case loadProofSource s0
+      case loadProofSource Strict s0
              (joiningWith
                 ("notation C where\n  join a b -> a \8746 b\n\n" ++ unlines
                    [ "judgment sub = G \8866 T <: S where"
@@ -1394,17 +1429,19 @@ reaching :: [TestTree]
 reaching =
   [ testCase "a class a role of the grammar itself names" $ do
       gs <- installedIn twoClasses
-      map (classesReached gs) [grammarCalled gs "L"]
-        @?= [[rootName "x", rootName "X"]]
+      map (classesReached gs) [grammarCalled gs "Two.L"]
+        @?= [[named "Two.x", named "Two.X"]]
   , testCase "and nothing for a grammar whose roles name none" $ do
       gs <- installedIn stlc
-      classesReached gs (grammarCalled gs "Ty") @?= []
+      classesReached gs (grammarCalled gs "STLC.Ty") @?= []
   , testCase "a class reached through two slots, named by neither grammar between" $ do
       gs <- installedIn chained
-      map (map nameString . classesReached gs . grammarCalled gs) ["P", "Q", "L"]
-        @?= [["x"], ["x"], ["x"]]
-      map (map nameString . classesNamed . grammarCalled gs) ["P", "Q", "L"]
-        @?= [["x"], [], []]
+      map (map nameString . classesReached gs . grammarCalled gs)
+          (map ("Chain." ++) ["P", "Q", "L"])
+        @?= [["Chain.x"], ["Chain.x"], ["Chain.x"]]
+      map (map nameString . classesNamed . grammarCalled gs)
+          (map ("Chain." ++) ["P", "Q", "L"])
+        @?= [["Chain.x"], [], []]
   , testCase "and two grammars that reach each other terminate at the union" $
       map (map nameString . classesReached cyclic) cyclic
         @?= [["u", "v"], ["v", "u"]]
@@ -1414,12 +1451,15 @@ reaching =
     -- every assertion below would then be about the empty list.
     installedIn src = do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
         (s1, other) -> do
           _ <- assertFailure (unlines (renderResponse s1 other))
           pure []
-    grammarCalled gs n = case [ g | g <- gs, grammarName g == rootName n ] of
+    -- **Under the fixture's own module namespace** (MS12 phase 313): a
+    -- module's languages live under the name its header gives it, so the
+    -- grammar a block in @module M where@ installed is @M.L@.
+    grammarCalled gs n = case [ g | g <- gs, grammarName g == named n ] of
       g : _ -> g
       [] -> error ("no grammar called " ++ n)
     nameString = nameDotted
@@ -1486,7 +1526,7 @@ refused =
           ++ "  f : x as binder -> ( let x = M in R[x] )\n"
       )
     , GrammarError LanguageBlock "L"
-        (InProduction "L.f" (ScopeElsewhere "R" (rootName "P") (rootName "x")))
+        (InProduction "M.L.f" (ScopeElsewhere "R" (named "M.P") (named "M.x")))
     )
   , ( ( "a token class that would read it"
       , "module M where\n\nany : Token String\nany = /./\n\nlanguage L, M where\n  f -> any M\n"
@@ -1526,7 +1566,7 @@ refused =
            "lift" (ParamNotReadable "s" (Global (rootName "String") []))
        , inNotation "a function that does not return the grammar's datatype"
            "dom : C -> C -> Ty\ndom = \\ a b -> Ty.base\n\nnotation C where\n  dom p q -> p \8746 q"
-           "dom" (FunctionResult (datatype "Ty"))
+           "dom" (FunctionResult (datatype "Joining.Ty"))
        , inNotation "a production writing a binding form"
            "notation C where\n  join a b -> a \8746 b[x]" "join" (FunctionBinds "b")
        , inNotation "a production with metadata"
@@ -1538,7 +1578,7 @@ refused =
          -- cannot be declared over it.
        , inNotation "a role in a block that only adds spellings"
            "notation C where\n  ext a b : a as occurrence -> a \8746 b" "ext"
-           (RolesAfterTheGrammar (rootName "C"))
+           (RolesAfterTheGrammar (named "Joining.C"))
        ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag
@@ -1548,7 +1588,9 @@ refused =
                ("language " ++ t ++ ", M where\n  f -> a") BuiltInTag
        | t <- builtInTags ]
   where
-    int = OfClass (rootName "n") (rootName "Int") (regex "[0-9]+")
+    -- **The class is under the fixture's module namespace** (MS12 phase 313):
+    -- every @klass@ fixture here is @module M where@.
+    int = OfClass (named "M.n") (rootName "Int") (regex "[0-9]+")
     wrap body =
       "module M where\n\nx : Token String\nx = /[a-z]+/\n\nn : Token Int\nn = /[0-9]+/\n\n" ++ body ++ "\n"
     inProduction title body p why = ((title, wrap body), GrammarError LanguageBlock "L" (InProduction p why))
@@ -1566,7 +1608,7 @@ refusals :: [TestTree]
 refusals =
   [ testCase title $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (_, Ran _ _ (Refused (GrammarRefused e))) -> e @?= want
         (_, other) -> assertFailure (show other)
   | ((title, src), want) <- refused
@@ -1574,7 +1616,7 @@ refusals =
   ++
   [ testCase ("unreadable: " ++ title) $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (_, Failed (BlockUnreadable e)) -> e @?= want
         (_, other) -> assertFailure (show other)
   | ((title, src), want) <-
@@ -1590,8 +1632,12 @@ refusals =
 -- | A generated datatype as a type: what a saturated former reduces to, which
 -- is what a §4.8 refusal carries so that its message can show the author the
 -- type their own signature says (MS8 phase 160).
+-- **A name may carry its module's namespace** (MS12 phase 313), so this reads
+-- the whole written name and makes the datatype's own namespace its last step:
+-- @Joining.Ty@ is the type former @Joining.Ty.Ty@.
 datatype :: String -> Core
-datatype n = Canonical (declaredAs n) [] []
+datatype n = Canonical (asDeclared (named n)) [] []
+  where asDeclared (GlobalName ps w) = GlobalName (ps ++ [w]) w
 
 regex :: String -> Regex
 regex = either (error . show) id . parseRegex

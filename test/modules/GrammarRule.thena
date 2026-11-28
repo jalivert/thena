@@ -1,0 +1,19 @@
+module test.modules.GrammarRule where
+
+-- A rule whose conclusion is not a judgment of this judgment: `RuleUnparsed`,
+-- below the line.
+language Tm, M, N where
+  tt -> true
+  ff -> false
+
+open Tm
+
+language Ty, T, S where
+  bool -> Bool
+
+open Ty
+
+judgment typing = ⊢ M : T where
+
+  T-true:    -----------------
+             ⊢ true

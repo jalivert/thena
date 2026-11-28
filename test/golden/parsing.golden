@@ -1,9 +1,9 @@
 thena spine> :parse LC ( λ x : ι . x )
-LC.abs(x, Ty.base, LC.var(x))
+LC.abs(x, base, LC.var(x))
 thena spine> :parse LC (λf:(ι->ι).(λy:ι.f y))
-LC.abs(f, Ty.arrow(Ty.base, Ty.base), LC.abs(y, Ty.base, LC.app(LC.var(f), LC.var(y))))
+LC.abs(f, arrow(base, base), LC.abs(y, base, LC.app(LC.var(f), LC.var(y))))
 thena spine> :parse LC ( λ █ : ι . █ )
-LC.abs(█, Ty.base, █)
+LC.abs(█, base, █)
 thena spine> :parse LC f a b
 in LC`f a b`: this term parses two ways, as LC.app(LC.var(f), LC.app(LC.var(a), LC.var(b))) and as LC.app(LC.app(LC.var(f), LC.var(a)), LC.var(b))
 thena spine> :parse LC { a a }
@@ -15,13 +15,13 @@ in LC`( λ x ι )`: unexpected 'ι' at character 7, expecting :
 thena spine> :parse LC ( λ x : ι .
 in LC`( λ x : ι .`: the term ends too soon, expecting x, ( or {
 thena spine> :parse Ty ( ι -> ( ι -> ι ) )
-Ty.arrow(Ty.base, Ty.arrow(Ty.base, Ty.base))
+arrow(base, arrow(base, base))
 thena spine> :parse Nope x
 no language called Nope has been declared
 thena spine> :parse LC
 each line is an LC term: Tab shows what fits at the cursor, █ is a part not written yet, :done leaves
 parse LC> ( λ x : ι . x )
-LC.abs(x, Ty.base, LC.var(x))
+LC.abs(x, base, LC.var(x))
 parse LC> f a b
 in LC`f a b`: this term parses two ways, as LC.app(LC.var(f), LC.app(LC.var(a), LC.var(b))) and as LC.app(LC.app(LC.var(f), LC.var(a)), LC.var(b))
 parse LC> :parse LC
@@ -29,4 +29,4 @@ in LC`:parse LC`: unexpected ':' at character 1, expecting x, ( or {
 parse LC> :done
 done parsing LC
 thena spine> :parse LC ( λ y : ι . y )
-LC.abs(y, Ty.base, LC.var(y))
+LC.abs(y, base, LC.var(y))

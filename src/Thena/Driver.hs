@@ -27,27 +27,35 @@ module Thena.Driver
   , newSession
   , withRuleBases
   , Response (..)
+  , MatchedRule (..)
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
   , Attempt (..)
   , Parked (..)
+  , Quest (..)
+  , parkedWord
+  , questWord
   , Working (..)
   , currentAttempt
+  , currentQuest
   , Snapshot
   , Record (..)
   , Entry (..)
   , Outcome (..)
+  , openableNamespaces
   , recordOf
   , standing
   , submittedLines
   , provedUnder
+  , provedSlices
   , Digest
   , digestOf
   , digestText
   , filesRead
   , noteRead
   , ChoicePoint (..)
+  , ChoiceAlt (..)
   , LoadError (..)
   , Loaded (..)
   , command
@@ -62,8 +70,34 @@ module Thena.Driver
   , unrecorded
   , loadProofSource
   , loadProofItems
+  , loadProofItemsAt
   , loadProofItemsConsulting
+  , loadProofItemsConsultingAt
+    -- * What a load came to, and what a frontend draws from it (MS12 phase 315)
+  , Leniency (..)
+  , Unfinished (..)
+  , NotDone (..)
+  , Partly (..)
+  , modulesPartly
+  , modulePartly
+  , moduleWhole
+  , moduleImportsOf
   , loadProofModules
+  , walkProofModules
+  , Walked (..)
+    -- * A suspended import (MS12 phase 309)
+  , Importing (..)
+    -- **The walk's own work list and what it has run** (MS12 phase 336,
+    -- @~6g27s@), named here because 'Importing' carries both.
+  , Step (..)
+  , Close (..)
+  , Landed (..)
+  , landedNames
+  , importSuspended
+  , finishImport
+  , abandonItem
+  , abandonImport
+  , refuseSuspension
   , ReadModule (..)
   , moduleConsults
   , moduleImports
@@ -123,18 +157,24 @@ module Thena.Driver
   , parseDeclaration
   , parseSurfaceTerm
   , parseSurfaceModule
+  , parseSurfaceModuleAt
   , Item (..)
+    -- * An item, and where it was written (MS12 phase 334, @~hcr2d@)
+  , Placed (..)
+  , unplaced
+  , itemsIn
+  , Pos (..)
   , rawRuleDecls
   , LoadKind (..)
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, isNothing, mapMaybe, maybeToList, listToMaybe)
 import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), Ident (..), close, freeVars, innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -153,13 +193,16 @@ import Thena.Language.Regex
   )
 import Data.Bits ((.&.), shiftR, xor)
 import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
-import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, sort, stripPrefix)
 import qualified Data.List.NonEmpty as NE
-import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
-import Thena.Development.Partial (Partial (..), extract, termsIn)
+import Thena.Development.Cursor
+  (expectedType, Cursor, Focus (..), focus, overLevels, rebuild)
+import Thena.Development.Partial (Partial (..), extract, termsIn, wordsTaken)
 import Thena.Engine
   ( ChoicePoint (..)
+  , ChoiceAlt (..)
   , rules
+  , setBases
   , Exec (..)
   , Machine (..)
   , Message
@@ -170,6 +213,7 @@ import Thena.Engine
   , isAsking
   , flatten
   , load
+  , loadWith
   , newDevelopment
   , focusContext
   , resumeAt
@@ -179,6 +223,10 @@ import Thena.Engine
   )
 import qualified Thena.Engine as Engine
 import Thena.Engine (whereImpure)
+-- Qualified, because this module has a 'declaredNames' of its own and it is a
+-- different question: which names a *module* declared, against every name the
+-- environment holds.
+import qualified Thena.Global.Env as GEnv
 import Thena.Errors
   ( ConversionFailure
   , FailReason (..)
@@ -210,6 +258,7 @@ import Thena.Global.Env
   , inductiveName
   , isDeclared
   , knownIn
+  , namespaceUnder
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -224,6 +273,7 @@ import Thena.Core.Trust
   , unmet
   )
 import Thena.Core.Typing (infer, sortOf)
+import qualified Thena.Development.Component as Component
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Ops
   ( partOf
@@ -248,16 +298,17 @@ import Thena.Instral.Infer
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
-  , RuleError
-  , RuleIter
   , Reading (..)
   , rootReading
-  , matches
-  , next
+  , matchingRules
+  , groupParams
   , resolveRule
   , resolveBlock
   , surfaceBlocks
   , RuleError (..)
+  , RuleFault (..)
+  , faultIn
+  , faultsIn
   , allCallable
   , baseRules
   , allSignatures
@@ -269,6 +320,7 @@ import Thena.Rules
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
+  , plicitiesIn
   , Surface (..)
   , SurfaceBinder (..)
   , SurfaceConstructor (..)
@@ -293,8 +345,9 @@ import Thena.Instral.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawPattern (..)
+  , RawSignature (..)
   )
-import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens, rawEscapes)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Pos (..), Token (..), lexModule, lexTokens, rawEscapes)
 import Thena.Language.Reader (Block (..), readBlock)
 import Thena.Language.Grammar
   ( Argument (..)
@@ -304,6 +357,8 @@ import Thena.Language.Grammar
   , checkNotation
   , constructorProductions
   , earleyRules
+  , grammarForTag
+  , grammarKey
   , notationInto
   , grammarWord
   , sortType
@@ -584,6 +639,155 @@ data Session = Session
     -- **Not in a 'Snapshot', and carried forward by 'rolledBack'** — the one
     -- field that survives a rollback along with the name counter, because a
     -- refusal does not unread a file.
+  , sessionPartly    :: [Partly]
+    -- ^ __which modules went in as far as they could__ (MS12 phase 315), most
+    -- recently loaded first.
+    --
+    -- **Only the partial ones are here.** A module that went in whole says so
+    -- by being in 'sessionLoaded' and absent from this, which is what makes
+    -- 'moduleWhole' a read of the two and costs a whole load nothing.
+    --
+    -- **Not in a 'Snapshot', for 'sessionLoaded''s reason**: what a load came
+    -- to is not a thing @:undo@ takes back.
+    --
+    -- **And 'rolledBack' does NOT carry it forward**, which is the opposite of
+    -- what it does for 'sessionFilesRead' and is deliberate: abandoning an
+    -- import takes everything, his ruling of 2026-11-11, so a ⚠️ for a module
+    -- that is no longer in would be a record of something that is not true.
+    -- A file having been read survives a rollback; a module having been partly
+    -- loaded does not.
+  , sessionImportsBy :: [(ModuleName, [ModuleName])]
+    -- ^ __what each module in the session imports__ (MS12 phase 315), which is
+    -- the only place the shape of the import graph survives: 'Thena.Files'
+    -- flattens the closure into dependency order before the walk, so by the
+    -- time anything lands the tree the user wrote is gone. @~84j24@'s pane is
+    -- drawn from this and 'modulePartly'.
+  , sessionImporting :: Maybe Importing
+    -- ^ __the import standing in a yield, if one is__ (MS12 phase 309).
+    --
+    -- **One at a time, his ruling of 2026-11-11**: a second @import@ while this
+    -- is set is refused, the way @:theorem@ is refused while a proof is open.
+    --
+    -- **Not in a 'Snapshot'**, like 'sessionLoaded' beside it and for the same
+    -- reason: what modules are in is not a thing @:undo@ takes back, and the
+    -- suspended load's own position is in the live machine rather than in here.
+  }
+  deriving (Eq, Show)
+
+-- | __An import that reached a @yield@ and is standing still__ (MS12 phase 309,
+-- his ruling of 2026-11-11).
+--
+-- **The suspended load stays in the LIVE machine**, which is what makes this
+-- small: its pool, its held bases, its scope, its program and its development
+-- are all already where they need to be, because a load runs in the machine like
+-- any other program and nothing here had to copy them out. **What this record
+-- holds is only what the load's own tail would have needed** — what to put back
+-- when it finishes, what to roll back to if it is given up, and how much of the
+-- closure has not run yet.
+--
+-- **So the session's own names stay concealed while it stands, and that is his
+-- ruling, not an accident**: /"what is in scope for the prompt, is what was in
+-- scope for the elaboration… you are now at the wheel for the sub-process that
+-- elaborates this file."/ Nothing in here lifts the concealment.
+data Importing = Importing
+  { importingBefore :: Session
+    -- ^ the session as it stood before any of the closure ran. **What
+    -- @:abandon@ goes back to**, through 'rolledBack', which takes everything
+    -- the user declared during the suspension with it — his ruling of
+    -- 2026-11-11, /"I want the abandoning of the import to take everything. The
+    -- honest way."/
+    --
+    -- **Its own 'sessionImporting' is 'Nothing'**, since one is in flight at a
+    -- time, so this does not nest.
+  , importingAt     :: Session
+    -- ^ the session as the suspended module's own load began — **the pool, the
+    -- held bases and the scope that go back when it completes**, which is what
+    -- @poolBack@ in 'loadProofItemsConsulting' closes over. Not the same as
+    -- 'importingBefore' when the closure had modules before this one.
+  , importingName   :: Maybe ModuleName
+    -- ^ the name the suspended module is reached by, where it has one. **A file
+    -- loaded by a path that is no module name has none**, exactly as
+    -- 'sessionLoaded' does not list one.
+    --
+    -- **Filled in by 'loadProofModules' and not by the load itself**, which is
+    -- handed the header's text and never the name: the two doors know different
+    -- amounts and this says which.
+  , importingText   :: String
+    -- ^ the header's text, for the 'ProofLoaded' the completion answers with
+  , importingItems  :: [Placed]
+    -- ^ the suspended module's items — what its interface and its declared
+    -- names are read off when it completes
+  , importingRest   :: [ReadModule]
+    -- ^ the closure past this module, still to run. **An @import@ may be a
+    -- graph**, so a suspension lands in the middle of a fold and the rest of the
+    -- walk has to be carried or it is lost.
+  , importingWarns  :: [Warning]
+    -- ^ what the suspended run had warned about before it stopped
+  , importingHeader :: ModuleName
+    -- ^ __the name the module's own header writes__ (MS12 phase 315), which is
+    -- the namespace its items are written in and what 'finishImport' needs to
+    -- carry on. Not 'importingName': that is the name it is /reached/ by, and
+    -- a file loaded by a path has none.
+  , importingPool   :: Pool
+    -- ^ __the pool the module is elaborated against__ (MS12 phase 315). The
+    -- rest of its items are compiled when the wheel comes back, and what an
+    -- import or a consult of this module brings is read off this — so the walk
+    -- that resumes it builds the same 'Brought' the walk that started it did.
+  , importingDone   :: [Landed]
+    -- ^ __the items that had gone in before the yield__ (MS12 phase 315), which
+    -- is what the finished load names as declared. It was every item of the
+    -- module until this phase, and a lenient load makes that a claim rather
+    -- than a fact.
+    --
+    -- **The yielding item is NOT one of them** (MS12 phase 317). It was, and
+    -- the claim was true only because @:abandon@ took the whole import: now
+    -- that an abandon gives up the item and leaves the module standing, an item
+    -- that never declared anything would have been counted as declared.
+    -- 'importingOn' carries it instead, and it joins this list in
+    -- 'finishingImport' at the moment it really has gone in.
+  , importingOn     :: Landed
+    -- ^ __the item the yield is inside__ (MS12 phase 317). It lands when the
+    -- wheel comes back and the program runs out; it is given up when
+    -- @:abandon@ says so, and then it is this that is written down as
+    -- unfinished.
+  , importingOnAt   :: Session
+    -- ^ __the session as 'importingOn' found it__ (MS12 phase 317) — where an
+    -- abandon goes back to, which is exactly what a lenient item's own failure
+    -- goes back to in 'walkItems'. **So abandoning takes what the user did
+    -- during the suspension**, which is his ruling of 2026-11-11 unchanged; what
+    -- phase 317 narrows is the SCOPE, from the closure to the item.
+  , importingLeft   :: [Step]
+    -- ^ __this module's steps the loader had not reached__ (MS12 phase 315),
+    -- **a 'Step' and not a 'Placed' since phase 336** (@~6g27s@): the end of a
+    -- block the suspension is standing inside is one of them.
+    -- **They are carried rather than spliced onto the tape**: a yielding rule's
+    -- @pc@ is the rule body's own program, so anything appended there runs
+    -- inside the rule and not after the declaration.
+  , importingLeniency :: Leniency
+    -- ^ __whether the act that typed this import was lenient__ (MS12 phase
+    -- 315). The rest of the closure runs when the yield hands control back, and
+    -- leniency belongs to the act rather than to any file in it — his ruling of
+    -- 2026-11-11 — so it has to survive the suspension.
+  , importingUnfinished :: [Unfinished]
+    -- ^ __what a lenient load had already left behind when it met the yield__
+    -- (MS12 phase 315). The 'Partly' record is written when the import
+    -- finishes, so an item the loader carried on past before the suspension has
+    -- to be carried across it.
+  , importingTheirs :: [GlobalName]
+    -- ^ __what the MODULE's own program declared__ (@~3c2db@, his ruling of
+    -- 2026-11-11), as against what the user typed at the prompt while it stood
+    -- suspended. **The module's are the ones its text wrote; a lemma proved to
+    -- get unstuck is the user's**, and a module with no @exporting@ clause
+    -- publishes what it declared — so without this one file would offer
+    -- different names depending on how a session went.
+    --
+    -- **ATTRIBUTED BY WHICH RUN DECLARED IT, AND THAT IS THE ONLY SOUND TEST.**
+    -- A line typed during the suspension runs /in front of/ the yield and the
+    -- module's remaining program runs /behind/ it, so the two never declare in
+    -- the same run: this is seeded with what the load's own first run added and
+    -- extended by each @yield@ that hands control back. **Per line it cannot be
+    -- done** — a @declare@ during the suspension and a @yield@ that reaches the
+    -- next yield both leave the machine yielding with new names behind them.
   }
   deriving (Eq, Show)
 
@@ -604,6 +808,15 @@ workingOn = sessionWork
 -- | Attempts left and re-enterable, most recently suspended first (§2.4).
 parked :: Session -> [Parked]
 parked = sessionSuspended
+
+-- | __The import standing in a yield, if one is__ (MS12 phase 309).
+--
+-- **What a frontend reads to know it is holding one**, and what the batch
+-- checker reads to refuse: @thena-check@ goes through the same loader a @:load@
+-- does, so the difference between handing the wheel over and refusing to is made
+-- by the caller and not inside the load.
+importSuspended :: Session -> Maybe Importing
+importSuspended = sessionImporting
 
 -- | How many instructions a run may do before handing control back — @Nothing@
 -- to run on, @Just n@ for at most @n@ (phase 128).
@@ -631,7 +844,8 @@ pendingQuestion = sessionAsking
 -- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
 -- builds a base with 'ruleBaseOfDecls' wants the same door.
 withRuleBases :: [RuleBase] -> Session -> Session
-withRuleBases bs s = s { sessionMachine = (sessionMachine s) { pool = bs } }
+withRuleBases bs s =
+  s { sessionMachine = setBases bs (held (sessionMachine s)) (sessionMachine s) }
 
 -- | What the session is working on.
 --
@@ -773,6 +987,80 @@ submittedLines = mapMaybe entrySubmitted . recordOf
 provedUnder :: GlobalName -> Session -> [Entry]
 provedUnder n = filter ((== Just n) . entryProof) . recordOf
 
+-- | __Which theorems the session proved, and where each one is in the
+-- transcript__ (MS12 phase 311): the name in full, and the first and last
+-- index into 'submittedLines'.
+--
+-- **The name is the only part a caller could not work out**, which is why this
+-- is a read here rather than a walk over 'recordOf' on the other side of the
+-- boundary: 'GlobalName' crosses as a type whose fields nothing out there can
+-- reach, and 'Thena.Render.nameString' is the wrong answer anyway — it applies
+-- the printer\'s shortest-ending policy, and a key written down and read back
+-- later has to mean the same thing whatever happens to be open then.
+--
+-- **A proof is a /run/ of consecutive entries under one name** rather than a
+-- single span from @:theorem@ to @qed@, and that is @:suspend@'s doing: a proof
+-- that was parked and picked up again is two runs with other lines between
+-- them, and submitting the runs in the order given replays it — the
+-- @:suspend@ and @:resume@ lines included, since each has the proof open on
+-- one side of it.
+--
+-- **Only names the session sealed appear.** @isDeclared@ is the test, so an
+-- attempt that was abandoned and never closed is absent entirely; a name that
+-- was abandoned and then proved on a second attempt lists both runs, because
+-- nothing in the record says which boundary ended a run — and replaying them
+-- in order is still right, an abandoned run replaying as an abandoned run.
+--
+-- **A line a frontend ran through 'oneProgram' takes no index**, having never
+-- been submitted; a run made only of those is not reported.
+provedSlices :: Session -> [(String, Int, Int)]
+provedSlices s =
+  [ (nameDotted n, minimum ks, maximum ks)
+  | run <- groupBy (\a b -> fst a == fst b) (numbered 0 (recordOf s))
+  , (Just n, _) <- take 1 run
+  , isDeclared n (globals (sessionMachine s))
+  , let ks = [ k | (_, Just k) <- run ]
+  , not (null ks)
+  ]
+  where
+    -- The proof each entry is under, paired with its index among the submitted
+    -- entries — which is what 'submittedLines' numbers.
+    numbered :: Int -> [Entry] -> [(Maybe GlobalName, Maybe Int)]
+    numbered _ []       = []
+    numbered k (e : es) = case entrySubmitted e of
+      Just _  -> (entryProof e, Just k) : numbered (k + 1) es
+      Nothing -> (entryProof e, Nothing) : numbered k es
+
+-- | __Which namespaces an @open@ here would accept, written out in full__
+-- (MS12 phase 312).
+--
+-- **What the completion offers after the word @open@.** Nothing enumerated them
+-- before, so the prompt could only say /a name goes here/; the tui track asked
+-- for the set and this is it.
+--
+-- **Every candidate is put through the act's own walk**
+-- ('Thena.Global.Env.namespaceUnder'), not through a test written here. The
+-- rule a dropdown has to keep is that no row it offers refuses when it is
+-- taken, and the only way to keep it is to ask the question the act asks: a
+-- path can be inhabited and still be ambiguous from where the writer stands,
+-- and that refusal is as real as the other one.
+--
+-- **Written in full, and the shortened forms are not offered.** @open A@ in
+-- force makes a written @Ty@ reach @A.Ty@, so the shortened spellings resolve
+-- too — but which of them do is the inverse of 'Thena.Core.Term.globalUnder'\'s
+-- walk, and nothing computes that. A full path always reads, so the offer is
+-- short of rows rather than wrong about them.
+openableNamespaces :: Session -> [String]
+openableNamespaces s =
+  [ intercalate "." p
+  | p <- nub (sort (concatMap prefixes (map nameSteps (GEnv.declaredNames env))))
+  , Right _ <- [namespaceUnder (scope machine) env p]
+  ]
+  where
+    machine = sessionMachine s
+    env     = globals machine
+    prefixes ws = [ take n ws | n <- [1 .. length ws] ]
+
 -- | __What a file said when it was read__ (MS11 phase 295).
 --
 -- **A number and not a signature.** What it is for is telling a file that has
@@ -863,22 +1151,57 @@ data Attempt = Attempt
   }
   deriving (Eq, Show)
 
--- | An attempt that has been put down, and where it was put down.
+-- | __What the session can be made to put down and pick up again__ (MS12 phase
+-- 310, his ruling of 2026-11-11).
+--
+-- **A proof and a suspended import go in ONE list under ONE word** — his, and
+-- the words are /"one list one word"/: @:proofs@ shows them together and
+-- @:resume ‹word›@ picks either up. **Nothing in the machinery tells them
+-- apart** beyond this one type, which is what stops @:suspend@, @:resume@ and
+-- @:proofs@ growing a second spelling each.
+--
+-- **Why it is a sum and not a record with two optional halves**: exactly one of
+-- them is parked, and a record would make /neither/ and /both/ representable
+-- for nothing. The live session keeps them in two fields instead
+-- ('sessionWork' and 'sessionImporting') because there a proof may be open
+-- /inside/ a standing import, which is how @:abandon@ gives up the innermost
+-- thing first.
+data Quest
+  = AProof Attempt     -- ^ a theorem being proved
+  | AnImport Importing -- ^ a module's load that reached a @yield@
+  deriving (Eq, Show)
+
+-- | What a quest is listed and asked for under — the one word (MS12 phase 310).
+--
+-- A theorem's name, or the header's text the import was reached by
+-- ('importingText'), which is what every message about a suspended import
+-- already names it by. **A theorem is always a root name** (@:theorem@ mints
+-- one with 'rootName'), so this is the word that was typed in both cases.
+questWord :: Quest -> String
+questWord q = case q of
+  AProof att -> nameDotted (attemptName att)
+  AnImport imp -> importingText imp
+
+-- | A quest that has been put down, and where it was put down.
 --
 -- **The snapshot is here and nowhere else** (phase 37). @:suspend@ is the only
 -- thing that builds one of these, @:resume@ the only thing that takes one
--- apart, so an attempt cannot carry a stale parking position while it is the
+-- apart, so a quest cannot carry a stale parking position while it is the
 -- one being worked on.
 --
 -- **The asymmetry with 'Working' is deliberate, not an oversight**: what is
--- live is an attempt beside a 'Machine'; what is parked is an attempt beside a
+-- live is a quest beside a 'Machine'; what is parked is a quest beside a
 -- 'Snapshot'. A parked one may not carry a machine, for the reason 'Snapshot'
 -- gives above.
 data Parked = Parked
-  { parkedAttempt :: Attempt
-  , parkedAt      :: Snapshot
+  { parkedQuest :: Quest
+  , parkedAt    :: Snapshot
   }
   deriving (Eq, Show)
+
+-- | The word a parked quest is listed and asked for under (MS12 phase 310).
+parkedWord :: Parked -> String
+parkedWord = questWord . parkedQuest
 
 -- | Put the machine at rest: no tape, no environment and **no frames**.
 --
@@ -908,6 +1231,18 @@ currentAttempt :: Session -> Maybe Attempt
 currentAttempt s = case sessionWork s of
   Scratch        -> Nothing
   Attempting att -> Just att
+
+-- | __The quest being worked on, if there is one__ (MS12 phase 310).
+--
+-- **Innermost first, which is 'Thena.Driver.command''s @abandonProof@ rule and
+-- not a second one**: a lemma opened inside a standing import is what the
+-- session is on while it is open, and the import is what it is on once there is
+-- no lemma. So @:proofs@ marks the same thing @:abandon@ would give up and
+-- @:suspend@ would park, and the three cannot come to disagree.
+currentQuest :: Session -> Maybe Quest
+currentQuest s = case sessionWork s of
+  Attempting att -> Just (AProof att)
+  Scratch        -> AnImport <$> sessionImporting s
 
 -- ---------------------------------------------------------------------------
 -- Trust accounting, asked of a session (MS8 phase 151)
@@ -985,7 +1320,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [] [], ps, []) }
@@ -993,6 +1328,8 @@ newSession = Session
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   , sessionLoaded    = []
+  , sessionPartly    = []
+  , sessionImportsBy = []
   , sessionPublicImports = []
   , sessionPublishes  = []
   , sessionPrivateIn  = []
@@ -1001,12 +1338,50 @@ newSession = Session
   , sessionGrammarsBy = []
   , sessionOpenedBy  = []
   , sessionFilesRead = []
+  , sessionImporting = Nothing
   }
   where
     (ps, n) = newDevelopment 0
 
 -- | What the driver hands back for a frontend to render. Data, never a line of
 -- text: rendering is "Thena.Repl"'s (§2.5).
+-- | __One row of @:matches@: a rule, not a clause__ — his ruling, 2026-11-19.
+--
+-- /"Each rule-arity, in other words — each rule, gets to be represented by one
+-- entry. So I could have @foo\/2@ and @foo\/4@ but never two @foo@s."/
+--
+-- **The placeholders come from the group's first clause and the type does
+-- not.** Clauses of one name and arity need not agree about what they call
+-- their parameters ('Thena.Rules.clauses'), so a row showing names has to pick
+-- a clause and the first one is the one a reader would mean — it is the clause
+-- dispatch reaches first. The type is not picked at all: inference gives
+-- exactly one signature per name and arity, so there is nothing to choose
+-- between.
+--
+-- **The patterns are not here and that is the change.** A row used to carry the
+-- clause's own patterns — @reverse-onto [] ‹acc›@ beside
+-- @reverse-onto [x, ...xs] ‹acc›@ — which is what made one name print many
+-- times, and what nothing in the surface could act on: a call picks its clause
+-- by matching, and @retry@ names a choice point and never a clause. A pane that
+-- shows the clauses behind a row is a separate feature he has asked for.
+data MatchedRule = MatchedRule
+  { matchedName   :: GlobalName
+    -- ^ the rule's name, spelled by whoever prints it
+  , matchedArity  :: Int
+    -- ^ how many arguments it takes. With 'matchedName' this is the key — what
+    -- 'Thena.Instral.Infer.Callable' is
+  , matchedParams :: [Ops.Pattern]
+    -- ^ the group's parameters, for placeholders — 'Thena.Rules.groupParams',
+    -- so each position is named by the first clause that binds a name there.
+    -- @length@ is 'matchedArity'
+  , matchedType   :: Maybe Signature
+    -- ^ **what the system worked out it takes and gives**, declared or
+    -- inferred. 'Nothing' cannot arise for a base that loaded, since a rule
+    -- whose types do not work out is refused — it is 'Maybe' so that a lookup
+    -- miss is a blank row rather than a crash
+  }
+  deriving (Eq, Show)
+
 data Response
   = Blank                     -- ^ an empty line; nothing to do
   | RenderedSurface Surface
@@ -1014,7 +1389,7 @@ data Response
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
-  | ShownData InductiveDefinition
+  | ShownData InductiveDefinition [(GlobalName, [Plicity])]
   | ShownRules InductiveDefinition
     -- ^ @:rules ‹judgment›@ — its constructors in the paper's form (MS8 phase
     -- 174). **A second command rather than a change to @:show@**: @:show@ gives
@@ -1090,8 +1465,13 @@ data Response
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
   | Undone                    -- ^ @:undo@ — one line taken back
-  | Proofs (Maybe Attempt) [Parked]
-    -- ^ @:proofs@ — the current one, if any, and the suspended ones
+  | Proofs (Maybe Quest) [Parked]
+    -- ^ @:proofs@ — the quest the session is on, if any, and the parked ones.
+    --
+    -- **A 'Quest' and not an 'Attempt' since MS12 phase 310**: a suspended
+    -- import is parked into this same list under its module name, his ruling of
+    -- 2026-11-11, so what is shown as live has to be able to be one too — in
+    -- limbo the session is on an import and on no proof.
     -- ^ @:extract@ — the closed term the development stands for (§7.5). Its
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
@@ -1103,7 +1483,7 @@ data Response
   | ParsingEntered String   -- ^ @:parse ‹L›@: the interactive mode began (phase 102b)
   | ParsingLeft String      -- ^ @:done@: it ended
     -- ^ @:parse@: the language, the text, and why it is not one term
-  | InferredSurface Surface Core
+  | InferredSurface Surface [Plicity] Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
     -- elaborating it produced. The **surface** term, not the core one it built,
     -- because the development it built was rewound and printing a term the
@@ -1136,6 +1516,16 @@ data Response
     -- declares nothing this side of running it, so it cannot be named in the
     -- list — but it did run, and a summary that left it out entirely would be
     -- saying less than happened
+  | ProofLoadedPartly String [String] Int [Warning] [Unfinished]
+    -- ^ __a proof module went in as far as it could__ (MS12 phase 315,
+    -- @~mgqwb@): the same four things 'ProofLoaded' carries, said of what
+    -- actually went in, and then what did not.
+    --
+    -- **A response of its own and not a warning on 'ProofLoaded'**, because it
+    -- is a different thing to have happened and the user has something to do
+    -- about it. **And the unfinished list is in file order with the first as
+    -- the root** — his ruling of 2026-11-11, /"one failure and forty-seven
+    -- pending, not forty-eight warnings"/.
   | RulesRequested [FilePath]
     -- ^ @:load@ on one or more @.thena.rules@ paths (phase 22). Like
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
@@ -1169,6 +1559,76 @@ data Response
     -- **And the warnings are 'ConsultRequested''s** (MS11 phase 298): a
     -- @public import@ written at the prompt has no importer to pass anything to,
     -- so the word is idle there for the reason it is idle in a rule file.
+  | ImportSuspended String [Message] [Warning] Message
+    -- ^ **a module's elaboration reached a @yield@ and the load is standing
+    -- still** (MS12 phase 309). The header's text, whatever the run
+    -- printed before it stopped, its warnings, and the yield's own message.
+    --
+    -- **Its own response and not a 'Ran' with a 'Yielded' in it**, which is what
+    -- the un-built behaviour answered: a frontend has to be able to tell /a rule
+    -- handed you the wheel/ from /a rule handed you the wheel and an import is
+    -- waiting on you/, because only the second has an @:abandon@ that takes a
+    -- whole module and a @yield@ that finishes a load. The messages are carried
+    -- through so what the run said is still shown.
+  | ImportResumed String [Message] [Warning] Message
+    -- ^ **a suspended import was handed back the wheel and reached ANOTHER
+    -- yield** (MS12 phase 309). 'ImportSuspended''s twin, and a separate
+    -- constructor so that a second stop does not read as a second import
+    -- starting.
+  | ImportAbandoned String Int [GlobalName]
+    -- ^ **@:abandon@ on a suspended import** (MS12 phase 309): the module, how
+    -- many declarations went, and **which of them were the user's own.**
+    --
+    -- **It says what went, because his ruling is that it takes everything** —
+    -- /"I want the abandoning of the import to take everything. The honest
+    -- way."/ — so a lemma proved at the prompt during the suspension goes with
+    -- it, and a message that did not say so would be the silent half of exactly
+    -- the data loss the second principle is about.
+    --
+    -- **The user's are named and the module's are counted, which is not
+    -- laziness.** A closure of three modules generates hundreds of names, and
+    -- the first thing printed was a seventy-line list nobody could read. That a
+    -- module's own declarations go when its import is given up is the obvious
+    -- half; **that your lemma goes is the half worth printing in full.**
+  | AbandonRequested String
+    -- ^ **@:abandon@ typed on a standing import** (MS12 phase 317): the
+    -- module's text, and nothing else, because 'Importing' holds the rest.
+    --
+    -- **It is a request and not the answer**, as every other @…Requested@ is:
+    -- giving the item up lets the rest of the module in, and that lands a
+    -- module, perhaps the closure behind it, perhaps a second suspension —
+    -- several responses, which only "Thena.Files"\'s @following@ can carry.
+    -- A single answer here is what forced the whole-module abandon to be the
+    -- only one that fitted.
+  | ImportAbandonedItem String [String] [GlobalName]
+    -- ^ **@:abandon@ gave up the DECLARATION a lenient import was elaborating,
+    -- and the module carried on** (MS12 phase 317, his ruling of 2026-11-14):
+    -- the module's text, the names that declaration would have made, and the
+    -- user's own that went back with it.
+    --
+    -- **Its own constructor beside 'ImportAbandoned' because the two take
+    -- different amounts.** That one ends the import; this one is the item
+    -- failing, so what follows it is the ordinary answer of a partly-loaded
+    -- module — and the user needs both halves said, since
+    -- 'ProofLoadedPartly' names the item but cannot know that a lemma of theirs
+    -- went with it.
+    --
+    -- **The user's own are named in full, as 'ImportAbandoned' names them**, and
+    -- for its reason: that the declaration goes is what @:abandon@ means, and
+    -- **that your lemma goes with it is the half worth printing.**
+  | ImportParked String
+    -- ^ **@:suspend@ on a standing import** (MS12 phase 310, his ruling of
+    -- 2026-11-11): the module, put down into @:proofs@ under the
+    -- header's text so that a lemma can be proved before it carries on.
+    --
+    -- **Its own constructor rather than 'Suspended'**, which is 309's rule for
+    -- every message about a suspended import: the thing put down has no
+    -- theorem's name and nothing certifies it, so a frontend that showed it as
+    -- a suspended proof would offer @qed@ on a module.
+  | ImportPickedUp String
+    -- ^ **@:resume ‹module›@ on a parked import** (MS12 phase 310): it is back
+    -- on the wheel, standing in its @yield@ exactly where it was left, and a
+    -- @yield@ carries it on. 'ImportParked''s twin.
   | ModuleAlreadyIn ModuleName
     -- ^ **@import ‹module›@ naming a module the session already holds** (MS11
     -- phase 284). A module is loaded once however many files reach it, so this
@@ -1288,7 +1748,7 @@ data Response
     -- saying what it does. The spelling carries the grouping: §2.4's rule is
     -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
     -- on the leading colon rather than being told twice
-  | Matched [Rule]
+  | Matched [MatchedRule]
   | Fitting String Ty [(GlobalName, Int, Bool, Signature)]
     -- ^ **what accepts or produces a type** (MS5 phase 71) — which question was
     -- asked, the type asked about, and for each callable its name, its arity, whether it is a rule (as
@@ -1297,12 +1757,16 @@ data Response
     -- **A second matching instruction, and deliberately not a pair with
     -- 'Matched'** — his ruling, §1.1: different input (a type, not the
     -- development), different relation (a signature fits, no head passes),
-    -- different consumer (the engine uses 'Matched' for @Prove@ and will never
+    -- different consumer (the engine uses 'Matched' for @Dispatch@ and will never
     -- use this). *\"Let's skip the pair and only make a rule that packages them
     -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
-    -- executed to find out whether one would succeed (§2.2)
+    -- executed to find out whether one would succeed (§2.2).
+    --
+    -- **One entry per name and arity, not per clause** — his ruling, 2026-11-19.
+    -- 'Thena.Rules.matchingRules' does the grouping and 'MatchedRule' says what
+    -- a row carries
   | Ran [Message] [Warning] Stop
     -- ^ what the machine said, what is worth warning about, and where it
     -- stopped.
@@ -1313,7 +1777,7 @@ data Response
     -- warning the system had (no-confusion skipped) was a 'Message', so it was
     -- shown at the prompt and lost in a file.
   | Failed SyntaxError
-  | LineRefused [RuleError]
+  | LineRefused [RuleFault]
     -- ^ the line parsed, and then said something no op or rule could be given
     -- (MS5 phase 62b) — an unknown tag, a region that did not parse, a word
     -- written with operands it does not take. The same errors a rule file is
@@ -1345,7 +1809,7 @@ data Stop
     -- @:choices@ after one says so. What the machine is kept /for/ is the
     -- messages and the reason; the proof itself is rewound by 'oneLine'.
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
-  | BlockRefused [RuleError]
+  | BlockRefused [RuleFault]
     -- ^ a @do@ block reached by the program did not validate (MS6 phase 104b).
     --
     -- **Two stops rather than one**, matching the two ways a block is wrong
@@ -1394,6 +1858,57 @@ data CommandError
     -- ^ @yield@ typed when no rule has handed control over (MS4 phase 45b).
     -- 'NotAsking''s twin, and it exists for the same reason: a word that did
     -- nothing would be worse than one that says so.
+  | ImportInFlight String
+    -- ^ **a second @import@ while one is standing in a yield** (MS12 phase 309,
+    -- his ruling of 2026-11-11: one in flight). Named for the module
+    -- that is waiting, not the one refused — that is the one the user has to do
+    -- something about. @:theorem@ refusing while a proof is open is the
+    -- precedent for the wording.
+  | ImportIsParked String
+    -- ^ **a second @import@ while one is parked in @:proofs@** (MS12 phase
+    -- 310). 'ImportInFlight''s sibling, and the same ruling of 2026-11-11:
+    -- one import at a time, in flight or put down.
+    --
+    -- **Parking does not make room for another one, and that is forced rather
+    -- than chosen.** A standing import holds the machine's pool, its held bases
+    -- and its concealment, and parking deliberately leaves all three in force —
+    -- /"what is in scope for the prompt, is what was in scope for the
+    -- elaboration"/ — so a second import would displace what the parked one
+    -- expects to find when it is picked up again. The repair it names is
+    -- @:resume@, because giving a parked import up means picking it up first.
+  | NobodyToYieldTo String
+    -- ^ **a module's elaboration yielded where there is no prompt to hand it
+    -- to** (MS12 phase 309), naming the module. Two callers refuse
+    -- this way: @thena-check@, which is a batch checker, and a module pulled in
+    -- by a /rule base/, where the user asked for a base and never named the
+    -- file that stopped.
+    --
+    -- **It is the caller's refusal and not the load's**, which is the whole
+    -- reason 'Walked' has three cases: the load does the same thing either way
+    -- and whoever asked for it decides whether there is a wheel to hand over.
+  | ProvingWhileYielding (Maybe String)
+    -- ^ **@:theorem@ typed while a rule is standing in a yield** (MS12 phase
+    -- 309, his ruling of 2026-11-11), carrying the import that is standing
+    -- where one is.
+    --
+    -- **It used to be allowed and it silently destroyed the suspended
+    -- elaboration**: the four proof boundaries go through 'atRest', which empties
+    -- the program, so the lemma landed and the thing it was for was gone —
+    -- @yield@ afterwards answered @nothing has yielded@. **Refusing is the
+    -- second principle, not against it**: going wrong is permitted, not being
+    -- able to see it coming is not, and the message names the way out.
+    --
+    -- **The field is what the way out is** (MS12 phase 310): a bare yield at
+    -- the prompt can only be handed back, and an import that is standing can be
+    -- parked instead — which is the whole of the five-step sequence his ruling
+    -- of 2026-11-11 describes, and 309 could not name it because there was
+    -- nothing to park. One constructor rather than two, because it is one
+    -- refusal with one cause; what differs is which repairs exist.
+  | GaveItUp
+    -- ^ **why an item is in a partly-loaded module's unfinished list when
+    -- nothing refused it** (MS12 phase 317): the user typed @:abandon@ while it
+    -- was elaborating. It is the reason carried in 'unfinishedWhy', where every
+    -- other entry carries the run that failed.
   | NoSuchGlobal String
   | NoSuchLanguage String
   | NotParsing
@@ -1425,9 +1940,14 @@ data CommandError
     -- under a half-built proof** — the user's reproducibility argument,
     -- 2026-08-25 — and *"loading a new rule-base in between theorems is fine
     -- for now"* is why this names the proof rather than refusing outright
-  | ProofsSuspended [GlobalName]
+  | ProofsSuspended [String]
     -- ^ … or while one is suspended, which is the same hazard postponed: a
-    -- suspended proof is resumed and continued, so its replay would change
+    -- suspended proof is resumed and continued, so its replay would change.
+    --
+    -- **Words rather than names since MS12 phase 310**, because a parked import
+    -- is in the same list and has a module's name and not a theorem's. Nothing
+    -- is lost: a parked theorem is a root name, so 'Thena.Render.nameString'
+    -- answered the word it was typed as.
   | LevelExpected String
     -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
@@ -1484,13 +2004,13 @@ parseDevelopment gr env opens = parseWith gr (\g e -> resolvePartial g e opens) 
 -- different reasons, so collapsing them would lose which.
 data LineError
   = LineSyntax SyntaxError
-  | LineIllFormed [RuleError]
+  | LineIllFormed [RuleFault]
   | LineMistyped [InstralTypeError]
     -- ^ the entry resolved and does not type check (MS5, reviewed 2026-09-12)
 
 -- | What was wrong with the @do@ blocks a surface term holds.
 data BlockProblem
-  = BlockIll [RuleError]
+  = BlockIll [RuleFault]
   | BlockMistyped [InstralTypeError]
 
 -- | Resolve, validate and type every @do@ block written inside a surface term
@@ -1562,8 +2082,9 @@ checkBlock gs bases bound r =
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
 instralEntry
-  :: [Grammar] -> [RuleBase] -> String -> Either LineError [Instr]
-instralEntry gs bases src = do
+  :: [Grammar] -> GlobalEnv -> InScope -> [RuleBase] -> [(Ops.Name, Value)]
+  -> String -> Either LineError [Instr]
+instralEntry gs env sc bases bound src = do
   ts  <- mapLeft LineSyntax (tokensOf src)
   -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
   -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
@@ -1571,20 +2092,38 @@ instralEntry gs bases src = do
   -- the prompt as well as in a file.
   ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
   is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
-  prog <- mapLeft LineIllFormed
-            -- **A prompt entry starts with nothing bound** (the @[]@, MS5
-            -- phase 82). Its own lines bind as it goes, which 'resolveBlock'
-            -- threads; what it does not inherit is a yielded rule\'s
-            -- environment, and that is the behaviour already recorded — the
-            -- driver has only ever built literals, so a typed command names a
-            -- hole and never a reference.
-            -- **And in no scope** (MS10 phase 267). An @open@ is a declaration
-            -- of the file or the session that wrote it; nothing hands the
-            -- session's scope to @instral@ today, and a prompt entry has no
-            -- @open@ of its own to honour — a local one does not exist
-            -- (`~c2smp`).
-            (resolveBlock (rootReading gs) (rootName "entry") []
-               (concatMap hoist (reverse is)))
+  prog <- mapLeft (LineIllFormed . faultsIn Nothing [])
+            -- **A prompt entry starts with the session\'s goals bound** (MS12
+            -- phase 324, his ruling of 2026-11-19) and with nothing else. Its
+            -- own lines bind as it goes, which 'resolveBlock' threads; the
+            -- goals come in as 'Thena.Engine.goalEnv' and are what make
+            -- @goto id1@ an ordinary reference. It began with nothing bound at
+            -- all (MS5 phase 82) on the grounds that /the driver has only ever
+            -- built literals, so a typed command names a hole and never a
+            -- reference/ — true then, and the whole of what his ruling
+            -- reversed. **What it still does not inherit is a yielded rule\'s
+            -- environment**: a @do@ block shares that and a typed line does
+            -- not, which is unchanged.
+            -- **AND IN THE SESSION'S SCOPE SINCE MS12 PHASE 313.** It was in
+            -- none, on the grounds that nothing handed @instral@ a scope and a
+            -- prompt entry has no @open@ of its own to honour (MS10 phase 267)
+            -- — true then, and harmless while every module declared at the root.
+            -- A language lives under its module's namespace now, so a typed
+            -- @fill Tm`0`@ had no way to name @Tm@ but by its whole path.
+            -- **The prompt is not a module and is not isolated**: its scope is
+            -- what a line typed there is written in, which is why a file's
+            -- top-level @open@ joins the session at all (`~7zn7k`).
+            --
+            -- **A PLAYED BLOCK IS STILL READ IN NO SCOPE** and that is
+            -- @~jmw4k@'s seam, recorded at 'Thena.Engine.Play': a block inside a
+            -- surface literal is the file's and this one is the session's, so
+            -- the only scope both could agree on was none.
+            -- **A typed entry drops the positions its statements were read
+            -- with** (MS12 phase 349): the prompt is not a file, and the
+            -- refusal of a line says so by naming no place — the engine's own
+            -- /the line is in front of you/.
+            (resolveBlock (Reading gs env sc) (rootName "entry") (map fst bound)
+               (concatMap hoist (map snd (reverse is))))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
   -- prompt halted mid-run where the same instruction in a rule body is refused
@@ -1596,13 +2135,13 @@ instralEntry gs bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases [] (Rule (rootName "entry") [] [] prog) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] Nothing [] prog Nothing []) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
   where
     -- Written core terms are hoisted per instruction — @try core\`x\`@ is
-    -- @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which is what a rule body writes by
+    -- @\'1 = resolve-core core\`x\` ; try \'1@, which is what a rule body writes by
     -- hand (MS5 phase 61b).
     hoist i = case i of
       RawDo (RawOp w os)   -> let (bs, os') = resolving w os
@@ -1625,16 +2164,19 @@ instralEntry gs bases src = do
 -- reporting names read out of code the system has already rejected. The offer then
 -- says what /kind/ of thing goes at the cursor and lists nothing, which is the
 -- honest answer while the lines above are broken.
-entryBindings :: [Grammar] -> [RuleBase] -> String -> [(Ops.Name, Ty)]
-entryBindings gs bases src = case instralEntry gs bases src of
+entryBindings
+  :: [Grammar] -> GlobalEnv -> InScope -> [RuleBase] -> [(Ops.Name, Value)]
+  -> String -> [(Ops.Name, Ty)]
+entryBindings gs env sc bases bound src =
+  case instralEntry gs env sc bases bound src of
   Left _     -> []
   Right prog ->
-    boundBy (allSignatures bases) (allCallable bases)
-      (Rule (rootName "entry") [] [] prog)
+    boundBy (allSignatures bases) (allCallable bases) bound
+      (Rule (rootName "entry") [] Nothing [] prog Nothing [])
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
--- @try core\`x\`@ is compiled to @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which
+-- @try core\`x\`@ is compiled to @\'1 = resolve-core core\`x\` ; try \'1@, which
 -- is what a rule body writes by hand. The op needs a term and a @core@ region
 -- is a 'VRaw' — a
 -- tree that has been parsed and not resolved — so something has to resolve it,
@@ -1648,10 +2190,13 @@ entryBindings gs bases src = case instralEntry gs bases src of
 -- names. @parseEquated@\'s comment about resolving two terms /in one continuous
 -- supply/ is satisfied by the sequence rather than by an argument.
 --
--- **The binding names cannot collide with a rule's own**, because @⌜@ is a
--- reserved character and no identifier may contain one. **It stopped being a
--- token at MS10 phase 269** and stayed reserved for exactly this, so a name
--- written here is still one a user cannot write.
+-- **The binding names cannot collide with a rule's own**, because a word in a
+-- rule body is lexed by @\@ident@ and must begin with an @$idstart@, and @\'@ is
+-- an @$idchar@ only — so @\'1@ is not a word any body can write.
+-- **It was spelled @⌜1⌝@ until MS12 phase 335** (`~6rfwp`, his ruling of
+-- 2026-11-21), when the corners it stood on left the reserved set: the argument
+-- is about the start class now rather than about a reserved character, which
+-- costs every modelled language nothing.
 -- That matters while the machine is yielding:
 -- @env@ is the suspended rule's and a name it chose must not be shadowed.
 --
@@ -1666,7 +2211,7 @@ resolving w os
     go _ [] = ([], [])
     go k (o : rest)
       | written o =
-          let n          = "\8988" ++ show k ++ "\8989"
+          let n          = "'" ++ show k
               (bs, rest') = go (k + 1) rest
            in (RawBind (RawPWord n) (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
       | otherwise =
@@ -1738,12 +2283,15 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- **The split happens here rather than in 'paired'**, which is about theorems:
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
+-- **It stays a @[Item]@** (MS12 phase 334): a @declare@ line is not in a file,
+-- so every position it could carry is 'Nothing' and the list would say nothing
+-- by being placed.
 parseSurfaceItems :: String -> Either SyntaxError [Item]
 parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup (reverse ds)
+  map placedItem <$> regroup (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
@@ -1753,8 +2301,24 @@ parseSurfaceItems src = do
 -- The same three passes 'parseSurfaceItems' makes, through the module start
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
+--
+-- **It answers without the positions, and 'parseSurfaceModuleAt' is the door
+-- that keeps them** (MS12 phase 334, @~hcr2d@) — this one is defined in terms
+-- of that one, so there is one parse and no second place for the two answers to
+-- drift apart. Everything that asks a question /about/ a module rather than
+-- loading it — its imports, its interface, what it withholds, printing it back
+-- — takes this one.
 parseSurfaceModule :: String -> Either SyntaxError (ModuleName, [Item])
-parseSurfaceModule src = do
+parseSurfaceModule = fmap (fmap (map placedItem)) . parseSurfaceModuleAt
+
+-- | __The same, with the line and column each item was written at__ (MS12 phase
+-- 334, @~hcr2d@).
+--
+-- **The load path takes this one**, because a declaration that does not go in
+-- is written down as an 'Unfinished' and his ask of 2026-11-20 is that the row
+-- a pane draws for it be a place to go.
+parseSurfaceModuleAt :: String -> Either SyntaxError (ModuleName, [Placed])
+parseSurfaceModuleAt src = do
   -- 'lexModule', not 'lexTokens': only a module's lexing takes an
   -- object-language block whole (MS6 phase 101).
   ts  <- mapLeft LexFailed (lexModule src)
@@ -1766,10 +2330,12 @@ parseSurfaceModule src = do
   -- this is where it can be read without changing either signature.
   -- **And a @hiding ( … )@ clause the same way** (MS11 phase 290): one slot on
   -- the header, two words, so exactly one of these items can arise.
+  -- **The header's item is unplaced** (phase 334): it is not a declaration and
+  -- there is no row for it to be a destination for.
   let hdr = case surfaceModuleExports m of
         SelectWide       -> []
-        SelectOnly   es  -> [ItemExporting (map resolvedName es)]
-        SelectHiding es  -> [ItemHiding (map resolvedName es)]
+        SelectOnly   es  -> [unplaced (ItemExporting (map resolvedName es))]
+        SelectHiding es  -> [unplaced (ItemHiding (map resolvedName es))]
       resolvedName (ps, x) = GlobalName ps x
   Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), hdr ++ is)
 
@@ -1778,8 +2344,8 @@ parseSurfaceModule src = do
 -- 'Thena.Engine.blockFailureOf'\'s twin, and the same reasoning: resolution can
 -- only produce 'Thena.Rules.BadOperands', because a word that names no op is a
 -- rule call and not an error.
-blockProblem :: [RuleError] -> SyntaxError
-blockProblem errs = case errs of
+blockProblem :: [RuleFault] -> SyntaxError
+blockProblem errs = case map faultWhy errs of
   BadOperands _ i w : _ -> BlockIllFormed i w
   _                     -> BlockIllFormed 0 "do"
 
@@ -1802,7 +2368,7 @@ data Item
     --
     -- **One per namespace**, so @open X Y Z@ regroups into three of these: the
     -- plural is the line's, not the item's.
-  | ItemNamespace GlobalName [Item]
+  | ItemNamespace GlobalName [Placed]
     -- ^ @namespace ‹name› where { … }@ (MS10 phase 254) — the namespace, and
     -- the items inside it.
     --
@@ -1810,14 +2376,20 @@ data Item
     -- printed back from these items and the nesting is what it is written
     -- with. The program 'surfaceProgram' builds /is/ flat: two ops around the
     -- inner instructions, which is where the prefix comes from.
-  | ItemOpenIn [Opened] [Item]
+    --
+    -- **AND THE ITEMS INSIDE ARE PLACED** (MS12 phase 336, @~6g27s@, his ruling
+    -- of 2026-11-22 that a composite item is walked into): 'walkItems' runs them
+    -- one at a time, so a declaration inside a block is a thing that can fail on
+    -- its own and a row that names it has a line to point at. The flattening is
+    -- the /walk's/, not the tree's — 'Step' is where the markers live.
+  | ItemOpenIn [Opened] [Placed]
     -- ^ @open X in ‹one declaration›@ (MS10 phase 254) — the opens, and the
     -- declaration they reach.
     --
     -- **A list of items because a declaration is one item here**, and the list
     -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
     -- with contents, and 'surfaceProgram' treats them the same way.
-  | ItemConsult Reach ModuleName (Maybe [Item])
+  | ItemConsult Reach ModuleName (Maybe [Placed])
     -- ^ @consult ‹module›@ (MS11 phase 273) — **a rule base this module's
     -- proofs are searched against**, named as a file and not as a namespace,
     -- and under @public@ one that travels to this module's importers (phase
@@ -1835,7 +2407,7 @@ data Item
     -- file is searched against is 'consultPushes', and whether a base travels
     -- is 'publicPushes'. 'moduleConsults' — the list the door with no IO
     -- refuses on — ignores it, because an unread base is unread either way.
-  | ItemImport Reach ModuleName Selection (Maybe [Item])
+  | ItemImport Reach ModuleName Selection (Maybe [Placed])
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
     -- on**, named as a file and not as a namespace — **and how far it reaches**
     -- (phase 291).
@@ -1850,7 +2422,7 @@ data Item
     -- 'LeaveReveal' around the inner program. **So 'fileImports' and
     -- 'moduleImports' are two different questions** — what this module may name
     -- throughout, and what has to be loaded first.
-  | ItemPrivate [Item]
+  | ItemPrivate [Placed]
     -- ^ @private ‹declaration›@ (MS11 phase 286, @~jmw4k@) — **the declaration
     -- is the file's own**, and no module that imports this one may name what it
     -- declares.
@@ -1893,12 +2465,66 @@ data Item
     -- a syntax error at the right place rather than a failure at run time.
   deriving (Eq, Show)
 
+-- | __An item, and where it was written__ (MS12 phase 334, @~hcr2d@).
+--
+-- **His ask of 2026-11-20 was a line and a column on a declaration that did not
+-- go in**, so that a pane's fold under a module ends somewhere the author can
+-- go instead of in a sentence. Nothing in the engine knew one: the lexer has
+-- 'Thena.Syntax.Lexer.Pos' on every token, @Parser.y@ reads it for the parse
+-- error alone, and 'Thena.Surface.Concrete' carries none — so a position had to
+-- be carried from the token stream to the loader, and this is what carries it.
+--
+-- **Beside the item and not inside it**, which is the one judgement in this
+-- phase. An 'Item' is /what a module or a @declare@ line asks for/ and that is
+-- true of an item nobody wrote: 'substitutionDefinitions' emits
+-- 'ItemTheorem's, the header's own @exporting@ clause arrives as an item, and a
+-- caller may hand 'loadProofItems' a list it built itself. Where a thing was
+-- written is a fact about how it reached us, not about what it asks for, so it
+-- is 'Nothing' for all three of those and a field on twelve constructors would
+-- have said otherwise twelve times.
+--
+-- **EVERY DECLARATION A FILE WRITES HAS ONE, INSIDE A BLOCK OR NOT** (MS12
+-- phase 336, @~6g27s@, his ruling of 2026-11-22). It was the top level alone
+-- until then, because a block was one item to the loader and a position inside
+-- one had nowhere to arrive; the loader walks into a block now, so the
+-- declaration that did not go in is the inner one and its own line is what a
+-- row points at. A block's first declaration takes the position of the brace
+-- that opened it ('Thena.Surface.Parser.openingAt'), every other one the @;@ in
+-- front of it.
+data Placed = Placed
+  { placedAt   :: Maybe Pos
+    -- ^ the line and column the item starts at, where it was read from a file
+  , placedItem :: Item
+  }
+  deriving (Eq, Show)
+
+-- | An item that came from nowhere a position can point into.
+--
+-- A generated definition, a header clause, a @declare@ line, or a list a caller
+-- assembled: there is no file and no line, and saying so is the point.
+unplaced :: Item -> Placed
+unplaced = Placed Nothing
+
+-- | __The items inside a block, without their places__ (MS12 phase 336,
+-- @~6g27s@).
+--
+-- Every question /about/ a module — what it declares, what it imports, what it
+-- consults, what it withholds — walks into a block and none of them cares where
+-- a declaration was written. **Only the loader does**, which is why the places
+-- are on the list and this is how everything else gets past them.
+itemsIn :: [Placed] -> [Item]
+itemsIn = map placedItem
+
 -- | Pair each signature with the equation after it, and pass datatypes through.
 --
 -- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
-regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
+-- **AND IT IS WHERE A POSITION BECOMES AN ITEM'S** (MS12 phase 334, @~hcr2d@):
+-- the position in front of the first declaration this step consumes is the
+-- position of everything it produces, which is what makes a signature and its
+-- equation one item written at the signature's line.
+regroup :: [(Maybe Pos, SurfaceDecl)] -> Either SyntaxError [Placed]
 regroup = go
   where
     -- **What the line said, as one namespace's 'Opened'** (MS10 phase 254).
@@ -1909,9 +2535,9 @@ regroup = go
       OpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
 
     go [] = Right []
-    go ds = do
+    go ds@((at, _) : _) = do
       (is, rest) <- one ds
-      (is ++) <$> go rest
+      (map (Placed at) is ++) <$> go rest
 
     -- | **One declaration, and what is left** (MS10 phase 254). It was a
     -- straight list walk until @open X in ‹declaration›@ needed to know where
@@ -1919,20 +2545,22 @@ regroup = go
     -- one declaration, so the open has to cover both, and only the pass that
     -- pairs them can say so.
     one [] = Right ([], [])
-    one (SurfaceDatatype d : rest) = Right ([ItemData d], rest)
-    one (SurfaceOpen ns spec : rest) =
+    one ((_, SurfaceDatatype d) : rest) = Right ([ItemData d], rest)
+    one ((_, SurfaceOpen ns spec) : rest) =
       Right ([ ItemOpen (opened spec (ps ++ [x])) | (ps, x) <- ns ], rest)
     -- **The declaration it reaches is taken by this same function**, so
     -- @open X in@ before a signature covers the equation under it too.
-    one (SurfaceOpenIn ns spec d : rest) = do
-      (is, rest') <- one (d : rest)
-      Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
+    one ((at, SurfaceOpenIn ns spec d) : rest) = do
+      (is, rest') <- one ((at, d) : rest)
+      Right ( [ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ]
+                          (map (Placed at) is)]
+            , rest' )
     -- **The same walk, for the same reason** (MS11 phase 286): @private@ before
     -- a signature covers the equation under it, because this is the pass that
     -- knows where one declaration ends.
-    one (SurfacePrivate d : rest) = do
-      (is, rest') <- one (d : rest)
-      Right ([ItemPrivate is], rest')
+    one ((at, SurfacePrivate d) : rest) = do
+      (is, rest') <- one ((at, d) : rest)
+      Right ([ItemPrivate (map (Placed at) is)], rest')
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
     -- they do outside one, and nesting needs nothing of its own.
@@ -1942,35 +2570,35 @@ regroup = go
     -- 291 and 292), as a @namespace@ block's declarations are: a signature and
     -- its equation pair inside an @import … where@ exactly as they do outside
     -- one, and nesting needs nothing of its own.
-    one (SurfaceConsult r ps x ds : rest) = do
-      inner <- traverse go ds
-      Right ([ItemConsult r (moduleFromSteps ps x) inner], rest)
+    one ((_, SurfaceConsult r ps x ds) : rest) = do
+      is <- traverse go ds
+      Right ([ItemConsult r (moduleFromSteps ps x) is], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
-    one (SurfaceImport r ps x sel ds : rest) = do
-      inner <- traverse go ds
-      Right ([ItemImport r (moduleFromSteps ps x) sel inner], rest)
-    one (SurfaceNamespace ps x ds : rest) = do
-      inner <- go ds
-      Right ([ItemNamespace (GlobalName ps x) inner], rest)
+    one ((_, SurfaceImport r ps x sel ds) : rest) = do
+      is <- traverse go ds
+      Right ([ItemImport r (moduleFromSteps ps x) sel is], rest)
+    one ((_, SurfaceNamespace ps x ds) : rest) = do
+      is <- go ds
+      Right ([ItemNamespace (GlobalName ps x) is], rest)
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
-    one (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+    one ((_, SurfaceGrammar k l txt) : rest) = case readBlock k l txt of
       Right b -> Right ([ItemGrammar b], rest)
       Left e  -> Left (BlockUnreadable e)
     -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
     -- ask what its words mean before the declarations above it have run — and
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
-    one (SurfaceBlock b : rest) = Right ([ItemBlock b], rest)
+    one ((_, SurfaceBlock b) : rest) = Right ([ItemBlock b], rest)
     -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv.X@
     -- and @fv-X@ are two names, so a signature written with a path wants its
     -- equation written with the same one.
-    one (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
+    one ((_, SurfaceSignature ps x ty) : (_, SurfaceEquation qs y body) : rest)
       | (ps, x) == (qs, y) = Right ([ItemTheorem (GlobalName ps x) ty body], rest)
-    one (SurfaceSignature ps x _ : _) =
+    one ((_, SurfaceSignature ps x _) : _) =
       Left (DeclarationsUnpaired (SignatureWithNoEquation (nameDotted (GlobalName ps x))))
-    one (SurfaceEquation ps x _ : _) =
+    one ((_, SurfaceEquation ps x _) : _) =
       Left (DeclarationsUnpaired (EquationWithNoSignature (nameDotted (GlobalName ps x))))
 
 -- --------------------------------------------------------------------------
@@ -2037,7 +2665,19 @@ broughtNothing = Brought (\_ _ -> []) (const ([], []))
 -- over 'revealsNothing', since a prompt conceals nothing to begin with.
 surfaceProgram
   :: Brought -> Int -> [Item] -> ([Instr], Int)
-surfaceProgram brought n0 items = foldl (item []) ([], n0) items
+surfaceProgram = surfaceProgramIn []
+
+-- | __The same, for items written inside a namespace already__ (MS12 phase 313).
+--
+-- **A module's items are written inside the namespace its header names** — his
+-- ruling of 2026-11-12 — so the fold starts there rather than at the root, and
+-- 'loadProofItemsConsulting' puts the 'Thena.Instral.Ops.EnterNamespace' pair
+-- round what comes back. Only a @data@ item reads the namespace here, for
+-- 'Thena.Instral.Ops.MakeData'\'s reason; everything else takes its place from
+-- the machine, which the ops have already moved.
+surfaceProgramIn
+  :: [String] -> Brought -> Int -> [Item] -> ([Instr], Int)
+surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
   where
   -- **@ns@ is the namespace the item is written in**, and only a @data@ item
   -- needs it here: a theorem, a primitive and anything a rule declares take
@@ -2074,7 +2714,7 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- block named ends up first and its dependencies sit under it — the file-wide
   -- order, one gate in.
   item ns (acc, n) (ItemConsult _ m (Just is)) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
         (bs, gs) = broughtConsult brought m
      in ( acc ++ [ Do (PushBase (basePath b)) | b <- reverse bs ]
               ++ [Do (Reveal gs)]
@@ -2099,10 +2739,19 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- inherited spelling and popped them with the frame. An @open@ does not
   -- travel at all now — 'openedFrom' says why — so there is one route into a
   -- file and one pair of ops to scope.
+  --
+  -- **AND SINCE MS12 PHASE 313 IT OPENS THE MODULE'S NAMESPACE TOO.** A
+  -- module's declarations live under its own name now, so revealing the keys is
+  -- no longer enough to let the block write them unqualified — the pair that
+  -- lifts the concealment and the pair that opens the namespace are the same
+  -- two gates, and a file-wide import gets both from 'opensFor'.
   item ns (acc, n) (ItemImport _ m sel (Just is)) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
         gs = broughtImport brought m sel
-     in (acc ++ [Do (Reveal gs)] ++ inner ++ [Do LeaveReveal], n1)
+     in ( acc ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- openedWide m ]
+              ++ inner
+              ++ [ Do LeaveOpen | _ <- openedWide m ] ++ [Do LeaveReveal]
+        , n1 )
   -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
   -- program at all: it says what an /importer/ may name, which is read when
   -- this module is recorded and never when it runs.
@@ -2136,9 +2785,9 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- **The inner program and nothing around it** (MS11 phase 286). @private@ is
   -- a mark on a declaration, not a scope: it changes who may name the result and
   -- not how the result is built, so there is no op to emit.
-  item ns (acc, n) (ItemPrivate is) = foldl (item ns) (acc, n) is
+  item ns (acc, n) (ItemPrivate is) = foldl (item ns) (acc, n) (map placedItem is)
   item ns (acc, n) (ItemOpenIn os is) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
      in ( acc ++ [ Do (Open o) | o <- os ] ++ inner
               ++ [ Do LeaveOpen | _ <- os ]
         , n1 )
@@ -2165,23 +2814,12 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- opens, so the difference is exactly what this block left pushed.
   item ns (acc, n) (ItemNamespace g is) =
     let inner' = ns ++ nameSteps g ++ [nameWord g]
-        (inner, n1) = foldl (item inner') ([], n) is
+        (inner, n1) = foldl (item inner') ([], n) (map placedItem is)
         pushed = length [ () | Do (Open _) <- inner ]
                    - length [ () | Do LeaveOpen <- inner ]
      in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner
               ++ [ Do LeaveOpen | _ <- [1 .. pushed] ] ++ [Do LeaveNamespace]
         , n1 )
-
-  -- | The plicity of each argument position a signature writes.
-  --
-  -- Only a leading run of @∀@ groups is read: once the type stops being a
-  -- quantifier there are no more named positions to speak of, and an arrow
-  -- contributes an 'Explicit' one.
-  plicitiesIn t = case t of
-    SurfacePi bs body ->
-      [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
-    SurfaceArrow _ body -> Explicit : plicitiesIn body
-    _ -> []
 
   -- A constructor's type is written in the scope of the parameters, so they
   -- are put back in front of it and peeled off again by
@@ -2320,7 +2958,14 @@ datatypeProgram ns n d roles =
                      -- that: @data Nat where { Pos.one : Nat }@ is @Nat.Pos.one@.
                      -- Nothing in the corpus writes one, and nesting is what a
                      -- namespace already does, so no refusal had to be invented.
-                     [ GlobalName (nameSteps dn ++ cps) cn | SurfaceConstructor cps cn _ <- cs ] roles
+                     -- **With the plicity of each argument position as it was
+                     -- written** (MS12 phase 320, `~td9j6`): the parameters
+                     -- 'paramsAround' puts back are explicit positions of the
+                     -- constructor, so the list is read off the same type that
+                     -- is elaborated above.
+                     [ ( GlobalName (nameSteps dn ++ cps) cn
+                       , plicitiesIn (paramsAround ps cty) )
+                     | SurfaceConstructor cps cn cty <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -2386,10 +3031,10 @@ paramsAround ps t =
   foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
 
 
-loadProofSource :: Session -> String -> (Session, Response)
-loadProofSource s src = case parseSurfaceModule src of
+loadProofSource :: Leniency -> Session -> String -> (Session, Response)
+loadProofSource leniency s src = case parseSurfaceModuleAt src of
   Left e            -> (s, Failed e)
-  Right (nm, items) -> loadProofItems s (moduleText nm) items
+  Right (nm, items) -> loadProofItemsAt leniency s nm items
 
 -- | Load a module that has already been read.
 --
@@ -2405,9 +3050,38 @@ loadProofSource s src = case parseSurfaceModule src of
 -- **The second door used to be a JSON spelling of the tree. It is not** — text is
 -- the only stored form (his ruling, 2026-09-27), and the JSON went with the
 -- project manifest; see "Thena.View.Source".
-loadProofItems :: Session -> String -> [Item] -> (Session, Response)
-loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
-  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) [] [] []) s nm items
+--
+-- **It is the door for a caller that built the items itself** (MS12 phase 334):
+-- there is no file, so nothing it loads can carry a line and a column, and an
+-- item of its that does not go in is written down without one.
+-- 'loadProofItemsAt' is the door the text takes.
+loadProofItems :: Leniency -> Session -> ModuleName -> [Item] -> (Session, Response)
+loadProofItems leniency s nm = loadProofItemsAt leniency s nm . map unplaced
+
+-- | __The same, for items read from a file__ (MS12 phase 334, @~hcr2d@), which
+-- carry the line and column they were written at.
+loadProofItemsAt :: Leniency -> Session -> ModuleName -> [Placed] -> (Session, Response)
+loadProofItemsAt leniency s nm placed = case (moduleImports items, moduleConsults items) of
+  -- **AND IT RECORDS THE MODULE, AS THE OTHER DOOR'S WALK DOES — MS12 phase
+  -- 313.** It did not have to while every file declared at the root: the
+  -- declarations were reachable from the prompt whether or not anything knew
+  -- which module they came from. They live under the module's own name now, so
+  -- a door that skipped 'moduleDeclared' left a module nobody could write the
+  -- names of — and left it out of 'sessionDeclaredBy', so nothing could import
+  -- it either. 'Thena.Driver.walkProofModules'\' @marked@ is the same call.
+  ([], []) ->
+    case loadProofItemsConsultingAt leniency
+           (Pool (rules (sessionMachine s)) [] [] []) s nm placed of
+      (s', r@(ProofLoaded {})) ->
+        (moduleDeclared nm (interfaceOf items) [] s s', r)
+      -- **A partly-loaded module is still IN** (MS12 phase 315): what went
+      -- through is declared and reachable, which is the whole of the feature,
+      -- and the 'Partly' beside it is what says the rest did not.
+      (s', r@(ProofLoadedPartly _ _ _ _ unfin)) ->
+        ( markedPartly (Just nm) (moduleText nm) unfin
+            (moduleDeclared nm (interfaceOf items) [] s s')
+        , r )
+      other -> other
   -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
   -- way to read a file (§12 invariant 4), so a module that names anything on
   -- disc cannot be elaborated through it — and silently elaborating it against
@@ -2420,6 +3094,10 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
   -- pool, an unread import would not elaborate at all.
   (is@(_ : _), _) -> (s, ImportsUnread is)
   ([], ms)        -> (s, ConsultsUnread ms)
+  where
+  -- Every question this door asks is about what the items /say/, and none of
+  -- them is about where they were written.
+  items = map placedItem placed
 
 -- | __What a module is searched against, and what those bases hand it__ (MS11
 -- phase 289, @~jmw4k@).
@@ -2498,7 +3176,8 @@ data HeldGroup = HeldGroup
 -- written out rather than left to a partial lookup. The stored-project door
 -- passes no groups at all and so writes no pushes.
 groupsFor
-  :: Session -> [HeldGroup] -> FilePath -> ModuleName -> ([FilePath], [GlobalName])
+  :: Session -> [HeldGroup] -> FilePath -> ModuleName
+  -> ([FilePath], [GlobalName], [Opened])
 groupsFor s groups path m =
   ( concat [ map fst (heldTexts g) | g <- mine ]
   -- **'revealedToBase' and not 'reachedBy'**, which is phase 299's finding for
@@ -2508,6 +3187,12 @@ groupsFor s groups path m =
   -- halves of the parity.
   , concatMap (revealedToBase s)
               (concat [ publishedTo (heldTexts g) | g <- mine ])
+  -- **AND THE NAMESPACES THEY ARE WRITTEN UNDER — MS12 PHASE 313.** A module's
+  -- declarations live under its own name, so revealing the keys a consulted
+  -- base published is not enough: the block needs a way to write them, which is
+  -- an @open@ of each publishing module's namespace. 'opensFor' is the same
+  -- answer an @import@ gets.
+  , opensFor (concat [ publishedTo (heldTexts g) | g <- mine ]) s
   )
   where
     mine = take 1 [ g | g <- groups, heldFor g == path, heldNamed g == m ]
@@ -2553,6 +3238,285 @@ data Held = Held
 -- else the session happens to hold. 'concealedFrom' works out the subtraction
 -- and 'Thena.Core.Term.scopeConcealed' says why it is a subtraction.
 
+-- | __Run a module's items one at a time__ (MS12 phase 315, @~mgqwb@).
+--
+-- **A module was one program for the whole file until this phase**, which is
+-- why a declaration that did not go through took the module with it: there was
+-- no boundary for the loader to carry on from. 'surfaceProgramIn' was always a
+-- fold over the items, so nothing has to be sliced out of a monolith — the
+-- same instructions are compiled, one item at a time, against the counter the
+-- item before it left.
+--
+-- **It is still ONE command.** Nothing observes the machine between two items,
+-- @globals@ is the same before the line and after it, and no suspended proof
+-- spans the load — the sentence §2.4's promise rests on, and the one a
+-- re-entrant loader would have broken.
+--
+-- **Two callers**, which is why it is here and not inside the load:
+-- 'loadProofItemsConsulting' runs a module from the start, and 'finishImport'
+-- runs what is left of one after a @yield@ handed the wheel back. **A second
+-- walk written for the suspension is the one that would drift**, and leniency
+-- would be the first thing to drift out of it.
+--
+-- The answer is the session, the warnings, the items that went in, the ones
+-- that did not, and — where it stopped early — a 'Stopped' saying what
+-- stopped it, on which item, from which session, and what it never reached.
+-- | __Did that run do what it said?__ (MS12 phase 315).
+--
+-- Said once because four places now ask it: the two one-instruction programs
+-- that enter and leave a module's namespace, and 'finishImport''s own.
+isCompleted :: Response -> Bool
+isCompleted r = case r of
+  Ran _ _ Completed -> True
+  _                 -> False
+
+-- | __Where a walk stopped before the last item, and what it needs to be
+-- picked up or given up__ (MS12 phase 317).
+--
+-- **It exists because the item in flight has two futures and the caller decides
+-- which.** A yield's item lands when the wheel comes back and is given up when
+-- @:abandon@ says so, and until this record neither the item nor the session it
+-- started from survived the return — so 'walkItems' had to call the yielding
+-- item @done@ before it was.
+data Stopped = Stopped
+  { stoppedBy     :: Response
+    -- ^ the run that stopped the walk — a @yield@, or a refusal under 'Strict'
+  , stoppedOn     :: Landed
+    -- ^ the item it was running, **where it was written, and the namespace it is
+    -- written in** (MS12 phases 334 and 336):
+    -- @:abandon@ turns this very item into an 'Unfinished', so the position has
+    -- to survive the suspension with it
+  , stoppedBefore :: Session
+    -- ^ the session as that item found it, which is what giving the item up
+    -- goes back to
+  , stoppedLeft   :: [Step]
+    -- ^ the steps it never reached. **Carried, never spliced onto the tape** —
+    -- 'importingLeft' says why.
+    --
+    -- **A 'Step' and not a 'Placed' since MS12 phase 336** (@~6g27s@): the walk
+    -- goes into a block now, so what is left of a suspended module may include
+    -- the end of a block it is standing inside, and that is a step like any
+    -- other. It is what makes a @yield@ inside a @namespace@ resume into the
+    -- namespace and leave it once.
+  }
+
+-- | __One thing the walk has left to do__ (MS12 phase 336, @~6g27s@, his ruling
+-- of 2026-11-22 that a composite item is walked into).
+--
+-- **The tree is flattened by the WALK and not by the item list.** A module is
+-- printed back from its items and the nesting is what it is written with, so
+-- 'ItemNamespace' stays a tree; what the loader needs is a work list it can stop
+-- in the middle of, and a block's end has to be on that list or a suspension
+-- inside the block could not be resumed.
+data Step
+  = Walking [String] Placed
+    -- ^ an item to elaborate, **and the blocks it is written inside** — the
+    -- prefix a @namespace@ block puts on what it holds, empty for a top-level
+    -- item. **Inside the module and not from the root**: every item of a module
+    -- shares the module's own namespace, which is the walk's argument, and a
+    -- summary of what landed names it the way the file writes it.
+  | Closing Close
+    -- ^ the end of a block the walk entered
+  deriving (Eq, Show)
+
+-- | __An item that ran, and the namespace it was written in__ (MS12 phase 336,
+-- @~6g27s@).
+--
+-- **A pair because a declaration inside a block declares a prefixed name.**
+-- @namespace lemmata where { good : … }@ declares @lemmata.good@, and once the
+-- loader runs that declaration on its own the item no longer says so — the
+-- block it came out of is somewhere else in the tree. So the walk carries the
+-- prefix beside the item, and every summary of what landed or did not asks
+-- 'landedNames' rather than the item alone.
+data Landed = Landed
+  { landedIn   :: [String]
+    -- ^ the namespace the item is written in — the module's own for a top-level
+    -- item, the block's prefix for one inside a @namespace@ block
+  , landedItem :: Placed
+  }
+  deriving (Eq, Show)
+
+-- | __What a landed item declared, under the prefix it landed at__ (MS12 phase
+-- 336, @~6g27s@).
+landedNames :: Landed -> [String]
+landedNames l = declaredNames (landedIn l) (placedItem (landedItem l))
+
+-- | __The end of a block, as data__ (MS12 phase 336, @~6g27s@).
+--
+-- **It carries what to run and not what was entered**, so that nothing has to
+-- be recomputed when a suspension is resumed hours later: the instructions are
+-- the ones 'surfaceProgramIn' would have put after the block's inner program,
+-- and they were worked out when the block was entered.
+data Close = Close
+  { closeOn      :: Landed
+    -- ^ the composite item being closed, for the refusal if the close itself
+    -- cannot run
+  , closeDepth   :: Maybe Int
+    -- ^ __how many @open@s to take off, said as a depth to come back to__ — the
+    -- length 'Thena.Core.Term.scopeOpens' had when the block was entered.
+    --
+    -- **It is a depth and not a count because the count is not known in
+    -- advance**: a @namespace@ block's items may write a bare @open@, and until
+    -- this phase the pops were counted off the one compiled program the whole
+    -- block became. **'Nothing' is a block that pops exactly its own**, which is
+    -- what @open … in@ and @import … where@ do, and leaving an inner @open@
+    -- standing is their behaviour from MS11 and not this phase's business.
+  , closeOps     :: [Instr]
+    -- ^ what to run once the @open@s are off
+  }
+  deriving (Eq, Show)
+
+walkItems
+  :: Leniency
+  -> Brought
+  -> [String]      -- ^ the namespace the module's items are written in
+  -> Session
+  -> [Warning]     -- ^ what this load has warned about so far
+  -> [Landed]      -- ^ what has gone in so far, newest first
+  -> [Unfinished]  -- ^ what has not, newest first
+  -> [Step]        -- ^ still to do
+  -> (Session, [Warning], [Landed], [Unfinished], Maybe Stopped)
+walkItems leniency brought base = go
+  where
+  go st ws done unfin [] = (st, ws, reverse done, reverse unfin, Nothing)
+  -- **THE END OF A BLOCK** (MS12 phase 336, @~6g27s@). The @open@s the block
+  -- left pushed come off, then its own closing ops, as one program — the same
+  -- shape entering it was. **It declares nothing, so it joins neither list**:
+  -- a close is bookkeeping and not an item, and a user has nothing to fix if
+  -- one fails.
+  go st ws done unfin (Closing c : rest) =
+    let m0   = sessionMachine st
+        pops = case closeDepth c of
+                 Nothing -> []
+                 Just d  -> [ Do LeaveOpen
+                            | _ <- [ 1 .. length (scopeOpens (scope m0)) - d ] ]
+     in case progress Nothing st { sessionMachine = load (pops ++ closeOps c) m0 } [] [] of
+          (st', r)
+            | isCompleted r -> go st' ws done unfin rest
+            | otherwise     ->
+                ( st', ws, reverse done, reverse unfin
+                , Just (Stopped r (closeOn c) st rest) )
+  -- **A COMPOSITE ITEM IS ENTERED AND WALKED INTO** (MS12 phase 336, @~6g27s@,
+  -- his ruling of 2026-11-22). It is the three moves
+  -- 'loadProofItemsConsultingAt' already makes for a module body, one level
+  -- down: the ops that open the block are run as their own program, its
+  -- declarations are spliced onto the work list in front of the block's end,
+  -- and the machine carries the scope from one to the next the way it carries
+  -- @globals@.
+  --
+  -- **The block's ENTRY is still all-or-nothing.** There is nowhere to put the
+  -- declarations if the namespace cannot be entered or the base cannot be
+  -- pushed, so the composite item fails as one item — which is what the whole
+  -- block did before this phase, and the only thing left of that bargain.
+  go st ws done unfin (Walking ns p : rest)
+    | Just (pre, inner, closer) <- opening ns p =
+        let m0    = sessionMachine st
+            depth = length (scopeOpens (scope m0))
+            after = inner ++ [ Closing (c depth) | Just c <- [closer] ] ++ rest
+            here  = Landed ns p
+         in if null pre
+              then go st ws done unfin after
+              else case progress Nothing st { sessionMachine = load pre m0 } [] [] of
+                (st', r) | isCompleted r -> go st' ws done unfin after
+                (st', r) -> case leniency of
+                  Strict  ->
+                    (st', ws, reverse done, reverse unfin, Just (Stopped r here st rest))
+                  Lenient ->
+                    go (rolledBack st st') ws done
+                       (Unfinished (landedNames here) (placedAt p)
+                                   (stoppedAs r) : unfin) rest
+  go st ws done unfin (Walking ns p : rest) =
+    let it       = placedItem p
+        m0       = sessionMachine st
+        (is, n1) = surfaceProgramIn (base ++ ns) brought (names m0) [it]
+     in case progress Nothing st { sessionMachine = load is m0 { names = n1 } } [] [] of
+          (st', Ran _ ws' Completed) ->
+            go st' (ws ++ ws') (Landed ns p : done) unfin rest
+          -- **A YIELD STILL STOPS THE WHOLE LOAD** (MS12 phase 309, his
+          -- ruling of 2026-11-11) — /"it suspends the elaboration then
+          -- and there and hands control to the prompt"/. A hole is the
+          -- absence of a proposal, so the loader carries on past it; a
+          -- yield is a rule saying /take over now/, and @now@ is what the
+          -- word means.
+          --
+          -- **THE ITEMS IT HAS NOT REACHED ARE HANDED BACK, NOT SPLICED
+          -- ONTO THE TAPE.** Splicing them was tried and is wrong: when a
+          -- rule yields, @pc@ is the /rule body's/ remaining program and
+          -- the item's own continuation is a frame beneath it, so
+          -- anything appended there runs inside the rule — which left
+          -- the module's namespace in the middle of elaborating the very
+          -- declaration that was waiting, and installed it at the root.
+          -- **The caller carries them across the suspension instead**,
+          -- and 'finishImport' walks them when the wheel comes back.
+          --
+          -- **THE YIELDING ITEM IS NOT COUNTED AS DONE** (MS12 phase 317). It
+          -- was until then, and the claim was true only because @:abandon@ took
+          -- the whole import: *"its program is standing in the machine and
+          -- 'finishImport' is reached only when that program has run out."*
+          -- **His ruling of 2026-11-14 made an abandon the item's own failure**,
+          -- which is a state in which the item never declares anything and the
+          -- module goes on — so the item travels in 'Stopped' and is put in one
+          -- of the two lists by whoever finishes the import.
+          (st', r@(Ran _ ws' (Yielded _))) ->
+            ( st', ws ++ ws', reverse done, reverse unfin
+            , Just (Stopped r (Landed ns p) st rest) )
+          (st', other) -> case leniency of
+            -- **Strict is what it always was**: the item's refusal is the
+            -- module's, and the caller puts the session back.
+            Strict  ->
+              ( st', ws, reverse done, reverse unfin
+              , Just (Stopped other (Landed ns p) st rest) )
+            -- **Lenient carries on.** The item is put back and written
+            -- down, and the loader goes to the next one.
+            Lenient ->
+              go (rolledBack st st') ws done
+                 (Unfinished (declaredNames ns it) (placedAt p)
+                             (stoppedAs other) : unfin) rest
+
+  -- | __A composite item, pulled apart into enter, inside and close__ (MS12
+  -- phase 336, @~6g27s@).
+  --
+  -- **The ops are exactly the ones 'surfaceProgramIn' puts around the inner
+  -- program**, which is what keeps the two readings of a block the same thing:
+  -- a @declare@ line compiles the whole block as one program and the loader
+  -- walks it, and neither may mean something the other does not.
+  --
+  -- @Nothing@ is everything else — a theorem, a datatype, a @do@ block, an
+  -- @open@ line, an act with no block — and those are run as they always were.
+  opening ns p = case placedItem p of
+    -- Two ops around the items inside, and **the @open@s the block added come
+    -- off with it** — his ruling @~ckmsk@, which is why this one closes to a
+    -- depth and the others do not.
+    ItemNamespace g is ->
+      Just ( [Do (EnterNamespace (Lit (VName g)))]
+           , map (Walking (ns ++ nameSteps g ++ [nameWord g])) is
+           , Just (\d -> Close (Landed ns p) (Just d) [Do LeaveNamespace]) )
+    -- The opens go on, the declaration runs, the opens come off.
+    ItemOpenIn os is ->
+      Just ( [ Do (Open o) | o <- os ]
+           , map (Walking ns) is
+           , Just (\_ -> Close (Landed ns p) Nothing [ Do LeaveOpen | _ <- os ]) )
+    -- **A mark and not a scope**, so there is nothing to enter and nothing to
+    -- close: the declarations inside are spliced onto the work list as they
+    -- stand, and 'privateIn' reads the tree for who may name them.
+    ItemPrivate is -> Just ([], map (Walking ns) is, Nothing)
+    -- The base goes on, the proofs run against it, the base comes off — and its
+    -- publications are revealed with it.
+    ItemConsult _ m (Just is) ->
+      let (bs, gs) = broughtConsult brought m
+       in Just ( [ Do (PushBase (basePath b)) | b <- reverse bs ] ++ [Do (Reveal gs)]
+               , map (Walking ns) is
+               , Just (\_ -> Close (Landed ns p) Nothing
+                             ([Do LeaveReveal] ++ [ Do PopBase | _ <- bs ])) )
+    -- The frame goes on, the declarations run, the frame comes off.
+    ItemImport _ m sel (Just is) ->
+      let gs = broughtImport brought m sel
+       in Just ( [Do (Reveal gs)] ++ [ Do (Open o) | o <- openedWide m ]
+               , map (Walking ns) is
+               , Just (\_ -> Close (Landed ns p) Nothing
+                             ([ Do LeaveOpen | _ <- openedWide m ] ++ [Do LeaveReveal])) )
+    _ -> Nothing
+
 -- **AND THE @open@S IT STARTS WITH ARE THE PRELUDE'S ALONE** (MS11 phase 283,
 -- @~w46f8@, narrowed at phase 293 by his ruling of 2026-11-06) — the third
 -- thing this load replaces and restores, and the last route into a file from
@@ -2576,8 +3540,17 @@ data Held = Held
 -- against to whoever consults it, so a file that consults a tactics base
 -- written against @LC@ may write @LC@ without importing it. 'Pool' carries the
 -- two halves together because they come out of the same texts.
-loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
-loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
+loadProofItemsConsulting
+  :: Leniency -> Pool -> Session -> ModuleName -> [Item] -> (Session, Response)
+loadProofItemsConsulting leniency pool s modName =
+  loadProofItemsConsultingAt leniency pool s modName . map unplaced
+
+-- | __The same, for items read from a file__ (MS12 phase 334, @~hcr2d@): the
+-- walk writes an item that did not go in down as an 'Unfinished', and
+-- 'unfinishedAt' is where its line and column arrive.
+loadProofItemsConsultingAt
+  :: Leniency -> Pool -> Session -> ModuleName -> [Placed] -> (Session, Response)
+loadProofItemsConsultingAt leniency (Pool poolOf published heldBases pushable) s modName placed
     -- **A clause that asked for something the module does not offer stops the
     -- load before anything runs** (MS11 phase 306, @~htngj@), which is where
     -- @~r58qh@'s header check sits for the same reason: the imported modules are
@@ -2586,34 +3559,60 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
     -- **The first clause that misses is the answer**, as a refusal always is.
   | ((m, missing) : _) <- unofferedBy s items = (s, ImportSelectsUnoffered m missing)
   | otherwise =
-    let inherited = openedFrom s
-        machine  = (sessionMachine s)
-                     { pool  = poolOf
+    let nm        = moduleText modName
+        inherited = openedFrom s
+        -- **THE NAMESPACES ITS IMPORTS OPEN** (MS12 phase 313). A module's
+        -- declarations live under its own name, so an importer reaches them by
+        -- the namespace and not by the root — 'opensFor' is the positive answer
+        -- 'reachedBy' was already computing and 'concealedFrom' was taking the
+        -- complement of.
+        brings    = opensFor (fileImports items ++ published) s
+        machine  = (setBases poolOf
                      -- **AND THE ONES A CONSULTED BASE'S OWN BLOCKS HOLD**
                      -- (MS11 phase 300), which reach 'Thena.Engine.held' by
                      -- path because they are already compiled into that
                      -- base's rules. **The session's stay under them**: a rule
                      -- base in the session's pool may have blocks of its own
                      -- and its rules can run during this load.
-                     , held  = map heldBase heldBases ++ pushable
-                                 ++ held (sessionMachine s)
-                     , scope = (scope (sessionMachine s))
+                     (map heldBase heldBases ++ pushable
+                        ++ held (sessionMachine s))
+                     (sessionMachine s))
+                     { scope = (scope (sessionMachine s))
                                  { scopeConcealed =
                                      [concealedFrom (fileImports items ++ published) s]
-                                 , scopeOpens     = inherited
+                                 , scopeOpens     = brings ++ inherited
                                  }
                      }
         -- **An import that states a block is not in the frame above** (MS11
         -- phase 291): what it reveals goes on where its block begins, which is
         -- 'Imported' and the two ops around the inner program.
-        (is, n1) = surfaceProgram
-                     (Brought
-                        (\m sel -> reachedBy [(m, sel)] s)
-                        (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
-                               , reachedBy (concat [ heldPublishes h
-                                                   | h <- heldBases
-                                                   , heldName h == m ]) s )))
-                     (names machine) items
+        -- **THE PROGRAM RUNS INSIDE THE NAMESPACE THE HEADER NAMES** (MS12
+        -- phase 313, his ruling of 2026-11-12). It is the same pair of ops a
+        -- @namespace@ block compiles to, which is the whole of why this needed
+        -- no new mechanism: a module body *is* a namespace block, and that is
+        -- what makes a file's declarations the file's rather than the root's.
+        --
+        -- **The block's @open@s are NOT popped with it**, which is the one way
+        -- this differs from 'ItemNamespace': a file's top-level @open@ joins the
+        -- session (`~7zn7k`), and @poolBack@ is what hands it over.
+        brought = Brought
+                    (\m sel -> reachedBy [(m, sel)] s)
+                    (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
+                           , reachedBy (concat [ heldPublishes h
+                                               | h <- heldBases
+                                               , heldName h == m ]) s ))
+        -- **The pair is run as its own program now** (MS12 phase 315), because
+        -- the items between them are run one at a time: the namespace is
+        -- entered once, every item is elaborated standing inside it, and it is
+        -- left once at the end. The machine carries the scope from one item to
+        -- the next the way it carries @globals@, so nothing had to be said
+        -- twice.
+        entering = case moduleGlobal modName of
+          Nothing -> []
+          Just g  -> [Do (EnterNamespace (Lit (VName g)))]
+        leaving = case moduleGlobal modName of
+          Nothing -> []
+          Just _  -> [Do LeaveNamespace]
         -- The pool the session had, put back the moment the module is in, the
         -- concealment lifted with it, and **the @open@s the session had put
         -- back under the ones the module wrote**: the prompt keeps whatever a
@@ -2622,10 +3621,10 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
         -- from its imports and never sees these.
         poolBack s'' =
           let final = scopeOpens (scope (sessionMachine s''))
-           in s'' { sessionMachine = (sessionMachine s'')
-                      { pool = pool (sessionMachine s)
-                      , held = held (sessionMachine s)
-                      , scope = (scope (sessionMachine s''))
+           in s'' { sessionMachine = (setBases (pool (sessionMachine s))
+                                                 (held (sessionMachine s))
+                                                 (sessionMachine s''))
+                      { scope = (scope (sessionMachine s''))
                                   { scopeConcealed =
                                       scopeConcealed (scope (sessionMachine s))
                                   , scopeOpens =
@@ -2639,41 +3638,120 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
         -- 'Thena.Instral.Ops.Play' does it for both kinds. Checking them here
         -- asked what their words meant before the declarations above them had
         -- run, which no dependency-ordered language does.
-     in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
-          (s', Ran _ ws Completed) ->
-            ( poolBack s'
-            , ProofLoaded nm (concatMap declaredNames items)
-                             (sum (map blocksIn items))
-                             -- **AND WHAT TRAVELS THAT THE HEADER DOES NOT LIST**
-                             -- (MS11 phase 307, @~f8x53@), appended after the
-                             -- run's own: a warning is a footnote to what went
-                             -- in, which is 'BasesLoaded''s rule for the other
-                             -- kind of file.
-                             (ws ++ unlistedTravelling s' items)
-            )
-          -- **A load that does not complete declares nothing** (MS6 closeout 15,
-          -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
-          -- partial run's declarations stayed: a module whose third definition
-          -- failed left the first two in 'globals', @:undo@ could not take them
-          -- back (they are deliberately outside a 'Snapshot'), and loading the
-          -- corrected file then failed on the names that had landed — with
-          -- 'Thena.Global.Declare''s @ConstructorTargetWrong@ blaming the
-          -- constructor's target (@AGENDA.md@ 81). One typo cost the session.
-          --
-          -- **Everything goes back except the counter.** 'rolledBack' restores
-          -- the session as it stood and carries 'names' forward, which is the
-          -- same partition @:infer@'s unconditional rewind already uses: a
-          -- number the user has seen must never be reissued (MS2 closeout 4f),
-          -- and a failed load /does/ show them — it prints its @solved: ?ℓ933@
-          -- lines before it stops.
-          --
-          -- **This does not make 'globals' observably non-monotone**, which is
-          -- what §2.4's promise rests on — his question, and it is the reason
-          -- this is allowed. A load is one command and nothing observes the
-          -- machine partway through it, so @globals@ is the same before the
-          -- command and after it. No suspended proof spans a load that is still
-          -- running, so resuming is as safe as it ever was.
-          (s', other)           -> (rolledBack s s', other)
+
+
+     in case progress Nothing s { sessionMachine = load entering machine } [] [] of
+          -- The namespace could not be entered, which is not an item's refusal
+          -- and is not made lenient by anything: there is nowhere to put what
+          -- the file declares.
+          (s', bad) | not (isCompleted bad) -> (rolledBack s s', bad)
+          (opened, _) ->
+            case walkItems leniency brought (moduleNamespace modName)
+                           opened [] [] [] (map (Walking []) placed) of
+            -- **A YIELD, and the rest of the module is standing on the tape**
+            -- (MS12 phase 309, his ruling of 2026-11-11). The arm below rolls
+            -- back everything that did not finish, and until phase 309 that
+            -- took a yielding load with it: the message printed, so the user
+            -- was told control had been handed over, and then the session was
+            -- put back — told a thing that had not happened.
+            --
+            -- **So this arm does the one thing the feature needs, which is to
+            -- NOT put it back.** No @poolBack@ either: the module's pool, held
+            -- bases and scope stay in force, which is his ruling and not an
+            -- oversight — /"what is in scope for the prompt, is what was in
+            -- scope for the elaboration."/
+            --
+            -- **ATOMICITY IS UNTOUCHED.** Nothing is declared until the load
+            -- completes, @globals@ is still the same before the command and
+            -- after it. A suspended load is one command that has not finished,
+            -- which is what a @yield@ at the prompt already was.
+            --
+            -- **'importingName', 'importingRest' and 'importingDone' are filled
+            -- in by 'loadProofModules'**, which is the caller that walked the
+            -- graph; this knows only its own module. 'loadProofItems' never
+            -- reaches here with a closure, because it refuses a module that
+            -- names anything on disc.
+            (s', _, done, unfin, Just stop)
+              | Ran msgs ws (Yielded msg) <- stoppedBy stop ->
+              ( s' { sessionImporting = Just Importing
+                       { importingBefore = s
+                       , importingAt     = s
+                       , importingName   = Nothing
+                       , importingHeader = modName
+                       , importingText   = nm
+                       , importingItems  = placed
+                       , importingPool   = Pool poolOf published heldBases pushable
+                       , importingDone   = done
+                       , importingOn     = stoppedOn stop
+                       , importingOnAt   = stoppedBefore stop
+                       , importingLeft   = stoppedLeft stop
+                       , importingRest   = []
+                       , importingWarns  = ws
+                         -- What this run declared before it stopped — the
+                         -- module's own, every one of them.
+                       , importingLeniency = leniency
+                       , importingTheirs = declaredSince s s'
+                         -- **AND WHAT IT HAD ALREADY LEFT BEHIND** (MS12 phase
+                         -- 315): a lenient load may have carried on past an
+                         -- item and then met a @yield@ in a later one, and the
+                         -- record of the first is only written when the import
+                         -- finishes.
+                       , importingUnfinished = unfin
+                       }
+                   }
+              , ImportSuspended nm msgs ws msg
+              )
+            -- **A STRICT LOAD THAT DOES NOT COMPLETE DECLARES NOTHING** (MS6
+            -- closeout 15, his ruling 2026-09-30: /"Atomic from now on."/).
+            -- Before that, the partial run's declarations stayed: a module
+            -- whose third definition failed left the first two in 'globals',
+            -- @:undo@ could not take them back (they are deliberately outside a
+            -- 'Snapshot'), and loading the corrected file then failed on the
+            -- names that had landed. One typo cost the session.
+            --
+            -- **Everything goes back except the counter.** 'rolledBack'
+            -- restores the session as it stood and carries 'names' forward,
+            -- which is the same partition @:infer@'s unconditional rewind uses:
+            -- a number the user has seen must never be reissued (MS2 closeout
+            -- 4f), and a failed load /does/ show them.
+            --
+            -- **This does not make 'globals' observably non-monotone**, which
+            -- is what §2.4's promise rests on — his question, and the reason
+            -- this is allowed. A load is one command and nothing observes the
+            -- machine partway through it, so @globals@ is the same before the
+            -- command and after it.
+            (s', _, _, _, Just stop) -> (rolledBack s s', stoppedBy stop)
+            -- **IT REACHED THE END.** Whether every item went through decides
+            -- which of the two answers it gets, and nothing else does.
+            (s', ws, done, unfin, Nothing) ->
+              case progress Nothing s' { sessionMachine = load leaving (sessionMachine s') } [] [] of
+                (s'', bad) | not (isCompleted bad) -> (rolledBack s s'', bad)
+                (closed, _) ->
+                  let declared = concatMap landedNames done
+                      blocks   = sum (map (blocksIn . placedItem . landedItem) done)
+                      -- **AND WHAT TRAVELS THAT THE HEADER DOES NOT LIST**
+                      -- (MS11 phase 307, @~f8x53@), appended after the run's
+                      -- own: a warning is a footnote to what went in, which is
+                      -- 'BasesLoaded''s rule for the other kind of file.
+                      --
+                      -- **Asked of the items that went in** and not of all of
+                      -- them: an import inside an item that did not go through
+                      -- brought nothing, so warning about what it would have
+                      -- carried would name a dependency the session has not got.
+                      warns    = ws ++ unlistedTravelling closed (map (placedItem . landedItem) done)
+                   in if null unfin
+                        then ( poolBack closed, ProofLoaded nm declared blocks warns )
+                        -- **The 'Partly' record is the CALLER's to write**,
+                        -- because it is keyed by the name the module is reached
+                        -- by and this door is handed the header's name instead —
+                        -- 'Importing''s @importingName@ is 'Maybe' for exactly
+                        -- that reason. What travels in the response is the list.
+                        else ( poolBack closed
+                             , ProofLoadedPartly nm declared blocks warns unfin )
+  where
+  -- Everything this door asks of the items is about what they say; the walk is
+  -- the only thing here that wants to know where one was written.
+  items = map placedItem placed
 
 -- | **A module and everything it imports, as one load** (MS11 phase 274).
 --
@@ -2706,9 +3784,8 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
 -- replay of these lines will open again — 'sessionFilesRead' has why a file
 -- that was read and then refused still counts, and 'rolledBack' is what keeps
 -- these notes when the install does not take.
-loadProofModules
-  :: Session -> [ReadModule] -> (Session, Either (ReadModule, Response) [Response])
-loadProofModules s00 ms0 = go s0 [] ms0
+loadProofModules :: Leniency -> Session -> [ReadModule] -> (Session, Walked)
+loadProofModules leniency s00 ms0 = walkProofModules leniency s0 s0 [] ms0
   where
     s0 = foldl' readsOf s00 ms0
 
@@ -2718,20 +3795,61 @@ loadProofModules s00 ms0 = go s0 [] ms0
              (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
                      | sp <- fromMaybe [] (readModulePool m) ])
 
-    go s acc [] = (s, Right (reverse acc))
+-- | __The walk itself, enterable in the middle__ (MS12 phase 309).
+--
+-- 'loadProofModules' with the fold's own state handed in: the session to roll
+-- back to, the session as it stands, the modules already in, and the modules
+-- still to run. **It is one function and not two because a suspension lands in
+-- the middle of the fold** — a @yield@ out of the third module of a closure has
+-- to be picked up with the first two in and the fourth still to go, and a second
+-- walk written for that case would be the one that drifts.
+--
+-- **'finishImport' is the other caller**, with the rest of the closure it was
+-- carrying.
+walkProofModules
+  :: Leniency -> Session -> Session -> [Response] -> [ReadModule] -> (Session, Walked)
+walkProofModules leniency s0 = go
+  where
+    go s acc [] = (s, WalkedAll (reverse acc))
     go s acc (m : rest) = case poolFor s m of
       -- **A base that will not resolve refuses the module it was consulted
       -- by** (MS11 phase 288), which is what names the file: a base reached
       -- through an @import@ fails against the module that published it, and
       -- "Thena.Files" already splits the one the user named from the rest.
-      Left bad   -> (rolledBack s0 s, Left (m, bad))
-      Right pool -> case loadProofItemsConsulting pool s
-                                        (moduleText (readModuleHeader m))
+      Left bad   -> (rolledBack s0 s, WalkedStopped m bad)
+      Right pool -> case loadProofItemsConsultingAt leniency pool s
+                                        (readModuleHeader m)
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
+        -- **A partly-loaded module is recorded and the walk carries on** (MS12
+        -- phase 315). It is in: what went through is declared, and the module
+        -- after it in the closure is elaborated against that. **Whatever it was
+        -- importing this for may well fail**, and when it does it is recorded
+        -- the same way one item down — which is the design's own answer,
+        -- leniency reaching everything the typed act pulls in.
+        (s', r@(ProofLoadedPartly _ _ _ _ unfin)) ->
+          go (markedPartly (readModuleName m) (moduleText (readModuleHeader m)) unfin
+                (marked m s (readModuleName m) s'))
+             (r : acc) rest
+        -- **A suspended load keeps the rest of the walk** (MS12 phase 309).
+        -- 'loadProofItemsConsulting' recorded what it knew — its own module's
+        -- text and items, and the session its pool goes back to; this fills in
+        -- the three things only the walk knows. **'importingBefore' is @s0@ and
+        -- not @s@**, because abandoning takes the whole closure: a module that
+        -- went in because this one imported it does not stay behind.
+        (s', r@(ImportSuspended {}))
+          | Just imp <- sessionImporting s' ->
+              ( s' { sessionImporting = Just imp
+                       { importingBefore = s0
+                       , importingName   = readModuleName m
+                       , importingRest   = rest
+                       }
+                   }
+              , WalkedSuspended (reverse acc) r
+              )
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
-        (s', bad)                -> (rolledBack s0 s', Left (m, bad))
+        (s', bad)                -> (rolledBack s0 s', WalkedStopped m bad)
 
     -- | The pool this module is elaborated against, resolved here rather than
     -- when the file was read — 'readModulePool' says why.
@@ -2777,7 +3895,7 @@ loadProofModules s00 ms0 = go s0 [] ms0
         -- they are read back off it here and travel in the 'Pool' with the
         -- rest of what the load is searched against.
         (s1, BasesLoaded pool _) ->
-          let scoped          = scopedConsults (readModuleItems m)
+          let scoped          = scopedConsults (map placedItem (readModuleItems m))
               (wide, blocks)  = splitAt (length groups - length scoped) groups
               runs            = map spreadPool groups
               bases           = take (length (concat runs)) pool
@@ -2808,9 +3926,353 @@ loadProofModules s00 ms0 = go s0 [] ms0
     -- 'broughtConsult' is what puts them back together.
     held n group = [ Held n b (publishedTo [t]) | (t, b) <- group ]
 
-    marked _ _      Nothing  s = s
+    -- **A file no module name reaches is still opened for the prompt** (MS12
+    -- phase 313). It is recorded nowhere — 'ReadModule'\'s @readModuleName@
+    -- says why, and nothing may import it — but the user asked for it by path
+    -- and its declarations are under its header's namespace, so without this
+    -- there would be no way to write them. 'openingModule' is the half of
+    -- 'moduleDeclared' that is about the prompt rather than about the module.
+    marked m _      Nothing  s = openingModule (readModuleHeader m) s
     marked m before (Just n) s =
-      moduleDeclared n (interfaceOf (readModuleItems m)) before s
+      moduleDeclared n (interfaceOf (map placedItem (readModuleItems m))) [] before s
+
+-- | __How a walk over a closure came out__ (MS12 phase 309).
+--
+-- **Three ways and not two**, which is the whole of what this phase changed
+-- about the shape: a load used to either go in or not, and a @yield@ had to be
+-- squeezed into /not/. **A caller must now decide what to do about a load that
+-- is standing still**, and the two kinds of caller decide differently — a prompt
+-- hands the user the wheel, and a batch checker has nobody to hand it to and
+-- refuses. Making it a third case is what forces that choice to be made rather
+-- than defaulted.
+data Walked
+  = WalkedAll [Response]
+    -- ^ every module of the closure is in, one response each, in the order they
+    -- went
+  | WalkedStopped ReadModule Response
+    -- ^ **nothing went in**, and this is the module it stopped on. The session
+    -- is already rolled back.
+  | WalkedHalted Response
+    -- ^ __a module the walk had already entered did not finish__ (MS12 phase
+    -- 315), with nothing to name but its own answer. The session is already
+    -- rolled back.
+    --
+    -- **It exists because 'finishImport' has no 'ReadModule'.** The rest of a
+    -- suspended module's items are run when the wheel comes back, and under
+    -- 'Strict' one of them may refuse — which until this phase surfaced as the
+    -- typed line halting, because the whole module was one program. The file is
+    -- the one the user has been staring at, so naming it again buys nothing;
+    -- what matters is that the answer is not reported as a load that worked.
+  | WalkedSuspended [Response] Response
+    -- ^ **the load is standing in a yield** and the session carries the
+    -- 'Importing' that says how to finish it or give it up.
+    --
+    -- **The modules of the closure that are already in come with it**, because
+    -- they really are in: a module the suspended one imported was elaborated
+    -- before it, its declarations are in the environment, and the user is about
+    -- to write code against them. Holding their responses back until the import
+    -- completes would report them minutes after they landed.
+    --
+    -- **The suspended module itself is not among them** — it is what the second
+    -- response is about, and nothing of it is declared until it finishes.
+  deriving (Eq, Show)
+
+-- | __A suspended import whose program has run out, finished off__ (MS12 phase
+-- 309).
+--
+-- **This is the piece with no precedent in the system** — the user's @yield@
+-- resumes the suspended program inside /that line's/ run, and that line has no
+-- idea it is finishing a load. So the completion is noticed after the line, by
+-- whoever sees that the machine's program ran out while an import was standing,
+-- and this is what it calls.
+--
+-- **It answers several responses, which is why it goes out through the same door
+-- a @:load@ does.** Finishing one module may put the next one in, and the next,
+-- and any of them may yield again — so one line can land a whole closure.
+-- "Thena.Files"\'s @following@ is that door and it already carries a list.
+--
+-- **The module's own declarations are what the file wrote, LESS what the user
+-- typed** (@~3c2db@, his ruling of 2026-11-11). 'moduleDeclared' works the
+-- module's declarations out as a set difference of the global environment, which
+-- cannot tell a name the file declared from a lemma proved at the prompt to get
+-- unstuck; 'importingMine' is that subtraction.
+finishImport :: Session -> (Session, Walked)
+finishImport = finishingImport Nothing
+
+-- | __The same, with the item in flight given up instead of landed__ (MS12
+-- phase 317, his ruling of 2026-11-14).
+--
+-- **@Nothing@ is the yield answered and @Just@ is @:abandon@**, and that is the
+-- whole difference between the two: which of the two lists 'importingOn' joins,
+-- and which session the rest of the module is walked from. Everything below is
+-- one path, so the abandoned case cannot drift away from the finished one —
+-- which is what a second copy of this function would have done first.
+finishingImport :: Maybe CommandError -> Session -> (Session, Walked)
+finishingImport gaveUp s0 = case sessionImporting s0 of
+  Nothing  -> (s0, WalkedAll [])
+  Just imp ->
+    let -- **Giving the item up goes back to where the item started**, which is
+        -- what a lenient item's own failure does in 'walkItems'. So the
+        -- suspended elaboration goes, and so does what the user declared while
+        -- it stood — his ruling of 2026-11-11 that an abandon takes your own
+        -- work with it, over the scope phase 317 narrowed it to.
+        s | Just _ <- gaveUp = rolledBack (importingOnAt imp) s0
+          | otherwise        = s0
+        -- **Which list the item in flight joins, and it is the only fork.**
+        -- 'importingOn' landed if the wheel came back and the program ran out;
+        -- it is unfinished if @:abandon@ said so.
+        (done0, unfin0) = case gaveUp of
+          Nothing  -> ( importingOn imp : reverse (importingDone imp)
+                      , reverse (importingUnfinished imp) )
+          Just _   -> ( reverse (importingDone imp)
+                      , Unfinished (landedNames (importingOn imp))
+                          (placedAt (landedItem (importingOn imp))) ItWasAbandoned
+                          : reverse (importingUnfinished imp) )
+        -- What the abandon is told to say, in front of the module's own answer:
+        -- 'ProofLoadedPartly' names the item but cannot know that a lemma of
+        -- the user's went back with it.
+        said = case gaveUp of
+          Nothing -> []
+          Just _  ->
+            [ ImportAbandonedItem (importingText imp)
+                                  (landedNames (importingOn imp))
+                                  [ g | g <- declaredSince (importingOnAt imp) s0
+                                      , g `notElem` importingTheirs imp ]
+            ]
+        at    = importingAt imp
+        items = map placedItem (importingItems imp)
+        hdr   = importingHeader imp
+        Pool _ _ heldBases _ = importingPool imp
+        -- **The same 'Brought' the walk that started this module built**
+        -- (MS12 phase 315), read off the pool it was carrying and the session
+        -- its load began in. What an import or a consult of this module brings
+        -- cannot be worked out from the live session, because the live session
+        -- is in the middle of the load.
+        brought = Brought
+                    (\m sel -> reachedBy [(m, sel)] at)
+                    (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
+                           , reachedBy (concat [ heldPublishes h
+                                               | h <- heldBases
+                                               , heldName h == m ]) at ))
+        leaving = case moduleGlobal hdr of
+          Nothing -> []
+          Just _  -> [Do LeaveNamespace]
+        -- The pool, the held bases and the concealment the module's load
+        -- replaced, put back now that it really has finished — 'poolBack' in
+        -- 'loadProofItemsConsulting', with the session it closed over handed
+        -- over in 'importingAt' instead.
+        inherited = openedFrom at
+        back st =
+          let final = scopeOpens (scope (sessionMachine st))
+           in st { sessionMachine = (setBases (pool (sessionMachine at))
+                                                (held (sessionMachine at))
+                                                (sessionMachine st))
+                     { scope = (scope (sessionMachine st))
+                                 { scopeConcealed =
+                                     scopeConcealed (scope (sessionMachine at))
+                                 , scopeOpens =
+                                     take (length final - length inherited) final
+                                       ++ scopeOpens (scope (sessionMachine at))
+                                 }
+                     }
+                 , sessionImporting = Nothing
+                 }
+        -- **THE REST OF THE MODULE RUNS HERE** (MS12 phase 315). It ran on the
+        -- tape until this phase, because the module was one program; with the
+        -- items run one at a time the tail cannot be spliced onto a yielding
+        -- rule's own program, so it is walked at the one moment the machine is
+        -- back at the module's own level with its namespace still in force.
+        --
+        -- **And it is walked with the act's leniency**, so a declaration below
+        -- a @yield@ is treated exactly as one above it would have been.
+     in case walkItems (importingLeniency imp) brought (moduleNamespace hdr)
+                       s (importingWarns imp) done0 unfin0 (importingLeft imp) of
+          -- **A second yield in the same module**, which is what @~4qgxx@
+          -- allows: the record is rewritten where it stood and the user is told
+          -- the load carried on rather than that a second import began.
+          (s2, ws, done, unfin, Just stop)
+            | Ran msgs ws' (Yielded msg) <- stoppedBy stop ->
+            ( s2 { sessionImporting = Just imp
+                     { importingAt    = at
+                     , importingDone  = done
+                     , importingOn    = stoppedOn stop
+                     , importingOnAt  = stoppedBefore stop
+                     , importingLeft  = stoppedLeft stop
+                     , importingWarns = ws'
+                     , importingTheirs = importingTheirs imp ++ declaredSince s s2
+                     , importingUnfinished = unfin
+                     }
+                 }
+            , WalkedSuspended said (ImportResumed (importingText imp) msgs ws msg)
+            )
+          -- **Strict, and an item below the yield refused**: the whole closure
+          -- goes back, which is what abandoning an import does and what
+          -- atomicity has always done.
+          (s2, _, _, _, Just stop) ->
+            ( rolledBack (importingBefore imp) s2, WalkedHalted (stoppedBy stop) )
+          (s2, ws, done, unfin, Nothing) ->
+            case progress Nothing
+                   s2 { sessionMachine = load leaving (sessionMachine s2) } [] [] of
+              (s3, bad) | not (isCompleted bad) ->
+                ( rolledBack (importingBefore imp) s3, WalkedHalted bad )
+              (closed, _) ->
+                let restored = back closed
+                    -- **Everything new that the module's own program did not
+                    -- declare** (@~3c2db@) — what the user typed at the prompt
+                    -- while it stood.
+                    --
+                    -- **AND THE RUN THAT FINISHES THE MODULE IS ONE OF THE
+                    -- MODULE'S RUNS** (MS12 phase 337, @~9qrnz@).
+                    -- 'importingTheirs' is seeded with what the load's own first
+                    -- run declared and extended by every @yield@ that hands
+                    -- control back — and the walk below is neither, so what it
+                    -- declared was extended into nothing and came out as the
+                    -- user's. A module with no @exporting@ clause publishes what
+                    -- it declared, so a declaration written after the yield was
+                    -- missing from the module's interface: the same file offered
+                    -- different names depending on whether it stopped.
+                    theirs = importingTheirs imp ++ declaredSince s s2
+                    usersOwn = filter (`notElem` theirs)
+                                      (declaredSince at closed)
+                    landed
+                      | null unfin =
+                          ProofLoaded (importingText imp)
+                                      (concatMap landedNames done)
+                                      (sum (map (blocksIn . placedItem . landedItem) done))
+                                      (ws ++ unlistedTravelling restored
+                                               (map (placedItem . landedItem) done))
+                      | otherwise =
+                          ProofLoadedPartly (importingText imp)
+                                            (concatMap landedNames done)
+                                            (sum (map (blocksIn . placedItem . landedItem) done))
+                                            (ws ++ unlistedTravelling restored
+                                                     (map (placedItem . landedItem) done))
+                                            unfin
+                    -- **AND A FILE NO MODULE NAME REACHES IS STILL OPENED FOR
+                    -- THE PROMPT** (MS12 phase 337, @~hdzp7@). It is recorded
+                    -- nowhere and nothing may import it, but the user asked for
+                    -- it by path and its declarations are under its header's
+                    -- namespace, so without this there is no way to write them —
+                    -- which is exactly what 'loadProofItemsConsultingAt''s
+                    -- @marked@ does for the same file when it goes in in one
+                    -- go. **'openingModule' is the half of 'moduleDeclared'
+                    -- that is about the prompt**, and this branch had only the
+                    -- other half's absence: the same file answered /nothing
+                    -- named stands has been declared/ one line after its own
+                    -- load said @declared stands@, depending on nothing but
+                    -- whether its elaboration happened to stop.
+                    s' = markedPartly (importingName imp) (importingText imp) unfin
+                       $ case importingName imp of
+                           Nothing -> openingModule hdr restored
+                           Just n  -> moduleDeclared n (interfaceOf items)
+                                                     usersOwn at restored
+                    -- **The accumulator starts with this module alone.** What
+                    -- the closure had already put in was reported at the
+                    -- suspension, by 'WalkedSuspended', so repeating it here
+                    -- would say it twice.
+                    -- **The accumulator is newest-first and reversed at the
+                    -- end**, so the abandon's own line goes under this one here
+                    -- and comes out in front of it.
+                 in walkProofModules (importingLeniency imp) (importingBefore imp) s'
+                                     (landed : reverse said) (importingRest imp)
+
+-- | __What the environment gained between two sessions__ (MS12 phase 309).
+--
+-- 'moduleDeclared''s @arrived@, said once so that the three places asking the
+-- same question cannot come to disagree about it — what a suspended load had
+-- declared before it stopped, what a @yield@ put in when it carried on, and what
+-- an @:abandon@ took away.
+--
+-- **Deduplicated, for 'moduleDeclared''s reason**: @declaredNames@ is four
+-- tables concatenated and a constructor is in two of them.
+declaredSince :: Session -> Session -> [GlobalName]
+declaredSince before after =
+  nub (filter (`notElem` had) (Env.declaredNames (globals (sessionMachine after))))
+  where
+    had = Env.declaredNames (globals (sessionMachine before))
+
+-- | __Give a suspended import up because there is nobody to hand it to__ (MS12
+-- phase 309).
+--
+-- 'abandonImport' with the refusal in front of it, for a caller with no prompt
+-- behind it. **The session is put back as it stood**, so a batch run that met a
+-- yield leaves nothing half-installed.
+refuseSuspension :: Session -> (Session, Response)
+refuseSuspension s = case sessionImporting s of
+  -- Cannot arise: the callers ask only when a walk answered 'WalkedSuspended',
+  -- which is the one thing that sets it. Written out rather than left to a
+  -- pattern-match failure.
+  Nothing  -> (s, Rejected NotYielding)
+  Just imp ->
+    ( fst (abandonImport s imp)
+    , Rejected (NobodyToYieldTo (importingText imp))
+    )
+
+-- | __Give a suspended import up, and everything that came with it__ (MS12 phase
+-- 309, his ruling of 2026-11-11).
+--
+-- **It takes the user's own work too, and that is the ruling** — /"I want the
+-- abandoning of the import to take everything. The honest way."/ A module's
+-- earlier declarations are in @globals@ while the load runs, so anything
+-- declared at the prompt during the suspension may be built on them; taking only
+-- the module's would leave a reference dangling, which is the problem revoking
+-- was refused over in @~mgqwb@, in miniature.
+--
+-- **'rolledBack' already does the whole of it**: it restores the session as it
+-- stood before the closure and carries only the fresh-name counter and what was
+-- read. So nothing here had to be written except the message, which names what
+-- went.
+--
+-- **THIS IS NOW THE STRICT DOOR ALONE** (MS12 phase 317). At the prompt an
+-- abandon is 'abandonItem', because the module can come in partly there; this is
+-- what is left for a door that has no prompt behind it — 'refuseSuspension',
+-- where there is nobody to hand the wheel to and no partial load to be had.
+abandonImport :: Session -> Importing -> (Session, Response)
+abandonImport s imp =
+  ( (rolledBack (importingBefore imp) s) { sessionImporting = Nothing }
+  , ImportAbandoned (importingText imp) (length took) mine
+  )
+  where
+    took = declaredSince (importingBefore imp) s
+    -- **What the user typed, as against what the files did** (@~3c2db@): the
+    -- module's own program recorded its names in 'importingTheirs', so what is
+    -- left over is the prompt's — and the prompt's is what a user did not
+    -- expect to lose.
+    --
+    -- **It is the whole closure's names less this module's program's**, so a
+    -- declaration from a module that went in earlier is not called the user's.
+    -- 'declaredSince' against 'importingAt' is that earlier part.
+    mine = [ g | g <- declaredSince (importingAt imp) s
+               , g `notElem` importingTheirs imp ]
+
+-- | __Give up the DECLARATION a suspended import is elaborating, and let the
+-- module carry on__ (MS12 phase 317, his ruling of 2026-11-14).
+--
+-- **His words:** /"would it make sense that it is treated as failure the same
+-- way as when partial import ignores this one and tries to bring into scope the
+-- rest? … That way I would lose that one theorem and every one that depends on
+-- it, but I wouldn't lose the entire module."/
+--
+-- **It is not a reversal of his ruling of 2026-11-11, and the ruling says so
+-- itself**: that one scoped the whole-module abandon to @~4qgxx@, where there
+-- was /"no partial import"/ — the loader had no boundary to carry on from. Phase
+-- 315 built one. What survives of the ruling is the part its reason was about:
+-- an abandon still takes what the user declared during the suspension, because
+-- those declarations are in @globals@ under the elaboration that is going.
+-- **What changes is the scope, from the closure to the item.**
+--
+-- **So an abandon is the item's own failure, and nothing else is written here**:
+-- 'finishingImport' is the one path a picked-up import takes, and it is handed
+-- the reason instead of a landing.
+--
+-- **'Lenient' is the whole of the condition.** A strict load has no partial
+-- module to leave behind, so there the abandon is still 'abandonImport' — which
+-- is not a special case but the same question 'walkItems' asks of every item
+-- that fails.
+abandonItem :: Session -> Importing -> (Session, Walked)
+abandonItem s imp = case importingLeniency imp of
+  Lenient -> finishingImport (Just GaveItUp) s
+  Strict  -> let (s', r) = abandonImport s imp in (s', WalkedHalted r)
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -2832,18 +4294,39 @@ loadProofModules s00 ms0 = go s0 [] ms0
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
 -- 'moduleExporting' is what the caller passes.
-moduleDeclared :: ModuleName -> Interface -> Session -> Session -> Session
-moduleDeclared n face before after
+-- | __Write down what a lenient load left behind__ (MS12 phase 315).
+--
+-- **The caller's, because the name is the caller's.** A load is handed the
+-- header's name and the walk knows the name the module is reached by, which is
+-- the same split 'Importing''s @importingName@ already makes — so the load
+-- answers with the list and whoever knows the name files it.
+--
+-- **Nothing is written for a module that went in whole**, which is what keeps
+-- 'moduleWhole' honest: absence from 'sessionPartly' is the answer and not a
+-- missing record.
+markedPartly :: Maybe ModuleName -> String -> [Unfinished] -> Session -> Session
+markedPartly n text unfin st
+  | null unfin = st
+  | otherwise  = st { sessionPartly = Partly n text unfin : sessionPartly st }
+
+moduleDeclared :: ModuleName -> Interface -> [GlobalName] -> Session -> Session -> Session
+moduleDeclared n face notMine before after
   | moduleLoaded n after = after
   | otherwise =
-      after { sessionLoaded     = n : sessionLoaded after
+      after { sessionMachine     = opened (sessionMachine after)
+            , sessionLoaded     = n : sessionLoaded after
             , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
+            -- **AND WHAT IT IMPORTS** (MS12 phase 315), which nothing else
+            -- keeps: @~84j24@'s pane is a tree and the closure was flattened
+            -- into dependency order before the walk began.
+            , sessionImportsBy = (n, interfaceImports face) : sessionImportsBy after
             , sessionGrammarsBy = (n, installed) : sessionGrammarsBy after
             , sessionOpenedBy   = (n, left) : sessionOpenedBy after
             , sessionExporting  =
-                maybe id (\e -> ((n, e) :)) (interfaceExporting face)
+                maybe id (\e -> ((n, map qualified e) :)) (interfaceExporting face)
                   (sessionExporting after)
-            , sessionPrivateIn  = (n, interfacePrivate face) : sessionPrivateIn after
+            , sessionPrivateIn  =
+                (n, map qualified (interfacePrivate face)) : sessionPrivateIn after
             , sessionPublicImports =
                 (n, interfacePublic face) : sessionPublicImports after
             , sessionPublishes =
@@ -2853,10 +4336,51 @@ moduleDeclared n face before after
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
     -- and a constructor is in two of them: a key naming its module twice would
     -- make any count taken off this list wrong.
+    -- **AND WHAT THE USER TYPED IS NOT THE MODULE'S** (MS12 phase 309,
+    -- @~3c2db@, his ruling of 2026-11-11). A name declared at the prompt while
+    -- this module's load stood suspended in a yield arrives in the same
+    -- difference and the difference cannot tell them apart: what the file
+    -- /wrote/ is the module's, and a lemma proved to get unstuck is the user's.
+    -- **The caller is what knows which** — 'finishImport' carries them on
+    -- 'importingMine' — and @notMine@ is empty for every load that never
+    -- suspended, which is all of them before this phase.
+    --
+    -- **It matters because a module with no @exporting@ clause exports what it
+    -- declared**, so without this one file would offer different names
+    -- depending on how a session happened to go.
+    -- **A PREFIX AND NO LONGER A SET DIFFERENCE — MS12 PHASE 313.** A
+    -- difference against the names the session already had cannot see a name
+    -- the module declared that the session also held, and dropped it from the
+    -- module's own interface: `~wk7cm`, where a correct file was refused for a
+    -- name its import genuinely brought in. A module's declarations now live
+    -- under its own namespace, so **which names are the module's is a fact
+    -- about the names themselves** and nothing has to be subtracted to find it.
+    --
+    -- **@notMine@ still applies and is still his ruling of 2026-11-11**
+    -- (@~3c2db@): the prompt stands inside the module's namespace while its load
+    -- is suspended, so a lemma typed to get unstuck lands under the module's
+    -- prefix too, and this is what keeps it out of what the module publishes.
     arrived =
       let had = Env.declaredNames (globals (sessionMachine before))
-       in nub (filter (`notElem` had)
+       in nub (filter (\g -> underModule g
+                               && g `notElem` had
+                               && g `notElem` notMine)
                       (Env.declaredNames (globals (sessionMachine after))))
+
+    -- **Nothing under a module's own namespace can have been there before it
+    -- loaded**, so for a namespaced module the difference above is a no-op and
+    -- this prefix is the whole answer — which is what repairs `~wk7cm`. **The
+    -- difference still earns its keep for the prelude**, whose declarations are
+    -- the root's: without it the primitives the environment is seeded with would
+    -- be recorded as the prelude's.
+    underModule g = moduleNamespace n `isPrefixOf` (nameSteps g ++ [nameWord g])
+
+    -- **A clause names a declaration of this module's, so it is read under this
+    -- module's namespace** (MS12 phase 313). @exporting ( Tm )@ is written as
+    -- the word the file writes and means the key @a.b.C.Tm@; 'exports' tests a
+    -- prefix, so qualifying here is what keeps that one test working for all
+    -- three ways a module withholds something.
+    qualified g = GlobalName (moduleNamespace n ++ nameSteps g) (nameWord g)
 
     -- **The same difference over the grammar table** (MS11 phase 297), and it
     -- needs no deduplication: a grammar list holds one entry per key.
@@ -2873,6 +4397,17 @@ moduleDeclared n face before after
     left = take (length now - length had) now
       where now = scopeOpens (scope (sessionMachine after))
             had = scopeOpens (scope (sessionMachine before))
+
+    -- **AND THE SESSION CAN WRITE THE MODULE'S NAMES UNQUALIFIED — MS12 phase
+    -- 313.** The prompt is not a module and is not isolated: a line you type
+    -- reaches everything the session holds, which is what lets you poke at a
+    -- module you have just loaded, and before this phase it did so because
+    -- every file declared at the root. **Wide, with no interface applied**, for
+    -- the same reason — @private@ says what an importing FILE may name.
+    --
+    -- **The next module to load does not see it**, because a load builds its
+    -- own 'scopeOpens' from 'openedFrom' and what its own imports bring.
+    opened mach = sessionMachine (openingModule n after { sessionMachine = mach })
 
 -- | __The one module every other may reach without importing it__ (MS11 phase
 -- 282, @~xdt8c@, his ruling of 2026-11-05).
@@ -2908,6 +4443,20 @@ preludeModule = ModuleName ["Prelude"]
 --
 -- **The prompt gets no concealment at all**: nothing calls this for a typed
 -- line, and 'Thena.Core.Term.rootScope' conceals nothing.
+-- | __The scope a file's text is read in__ (MS12 phase 313).
+--
+-- **The two halves of what importing these modules means, in one place.** What
+-- the file may not reach ('concealedFrom'), and how it writes what it may
+-- ('opensFor') — a module's declarations live under its own name since this
+-- phase, so an importer that was given only the subtraction could reach a key
+-- and have no way to spell it. **Both are read off the same list of imports**,
+-- which is what stops a file's view and a file's spelling drifting apart.
+scopeImporting :: [(ModuleName, Selection)] -> Session -> InScope
+scopeImporting ims s = rootScope
+  { scopeConcealed = [concealedFrom ims s]
+  , scopeOpens     = opensFor ims s
+  }
+
 concealedFrom :: [(ModuleName, Selection)] -> Session -> [GlobalName]
 concealedFrom ims s =
   nub ([ g | g <- Env.declaredNames env
@@ -2972,13 +4521,19 @@ grammarsReachedBy ms0 s = concatMap (one []) ms0
     -- datatype are granted together because the test is a prefix, so a clause
     -- that keeps @LC@ out keeps the language out of both tables and a term
     -- written in it is refused at the tag.
+    -- **AND THE CLAUSE IS READ AS THE IMPORTER WRITES IT — MS12 PHASE 313**,
+    -- which 'reachedBy' does for names: a language lives under its module's
+    -- namespace, so @import Lang ( A )@ is a word about @A.LC@ and not about
+    -- the key @test.modules.Lang.A.LC@. 'asWritten' is the one reading.
     one seen (m, sel)
       | m `elem` seen = []
       | otherwise     =
-          selects sel
-            (filter (interfaceAdmits m s)
-                    (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
-               ++ concatMap (one (m : seen)) (publicImportsOf m s))
+          [ g
+          | g <- filter (interfaceAdmits m s)
+                        (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
+                   ++ concatMap (one (m : seen)) (publicImportsOf m s)
+          , not (null (selects sel [asWritten s g]))
+          ]
 
 -- | __What importing these modules reaches__ (MS11 phase 291).
 --
@@ -2993,6 +4548,45 @@ grammarsReachedBy ms0 s = concatMap (one []) ms0
 -- and the frame an @import … where@ pushes are the same question asked of
 -- different imports, and asking it twice over is how the two would come to
 -- differ.
+-- | __Which namespaces importing these modules opens__ (MS12 phase 313, his
+-- ruling of 2026-11-12).
+--
+-- **'reachedBy' said the other way round.** A module's declarations live under
+-- its own name, so what an import gives the importer is a way to write them:
+-- one @open@ per module in the closure, admitting exactly the words
+-- 'reachedBy' answered with. **The words are read off that answer rather than
+-- worked out again**, which is what keeps the two from ever disagreeing — a
+-- clause, an @exporting@ list and a @private@ mark all reach this through the
+-- one function that already applies them.
+--
+-- **A module that offers nothing admits nothing**: @Just []@ opens no word,
+-- where 'Nothing' would open every one.
+opensFor :: [(ModuleName, Selection)] -> Session -> [Opened]
+opensFor ms0 s =
+  [ Opened ps (Just ws) [] []
+  | m <- nub (concatMap (closure []) ms0)
+  , ps@(_ : _) <- [moduleNamespace m]
+  , let ws = nub [ w | g <- reached, Just w <- [firstUnder ps g] ]
+  ]
+  where
+    -- **Names and grammar keys together**, because a language's key is reached
+    -- by the same walk a name is — 'revealedToBase' is the same pair for a rule
+    -- file's block, and 'concealedFrom' subtracts both.
+    reached = reachedBy ms0 s ++ grammarsReachedBy ms0 s
+
+    -- Every module these imports reach, whatever each clause narrowed it to:
+    -- the clause decides which WORDS are admitted, and this decides which
+    -- namespaces there are to admit them under.
+    closure seen (m, _)
+      | m `elem` seen = []
+      | otherwise     = m : concatMap (closure (m : seen)) (publicImportsOf m s)
+
+    -- The step that follows this prefix, where the name is under it at all.
+    firstUnder ps g
+      | ps `isPrefixOf` steps, w : _ <- drop (length ps) steps = Just w
+      | otherwise = Nothing
+      where steps = nameSteps g ++ [nameWord g]
+
 reachedBy :: [(ModuleName, Selection)] -> Session -> [GlobalName]
 reachedBy ms0 s = concatMap (one []) ms0
   where
@@ -3005,8 +4599,18 @@ reachedBy ms0 s = concatMap (one []) ms0
     one seen (m, sel)
       | m `elem` seen = []
       | otherwise     =
-          selects sel (exportedByModule m s
-                         ++ concatMap (one (m : seen)) (publicImportsOf m s))
+          selects' sel (exportedByModule m s
+                          ++ concatMap (one (m : seen)) (publicImportsOf m s))
+
+    -- **A CLAUSE NAMES WHAT THE IMPORTER WILL WRITE — MS12 PHASE 313.** A
+    -- module's declarations live under its own namespace now, so @Twins@'s
+    -- @Bit@ is the key @test.modules.Twins.Bit.Bit@ while
+    -- @import test.modules.Twins ( Bit )@ writes @Bit@ — the word the importer
+    -- gets, which is what an @open@ of that namespace admits. **So each name is
+    -- tested under its OWN module's namespace**, which is also the only reading
+    -- that works for a name passed on by a @public import@: it belongs to a
+    -- third module and is written by its own word, not by the importer's.
+    selects' sel gs = [ g | g <- gs, not (null (selects sel [asWritten s g])) ]
 
     -- **The guard is per PATH now and no longer across the whole walk** (phase
     -- 306). It was one flat worklist, which deduplicated a module reached by
@@ -3056,7 +4660,7 @@ revealedToBase s w = reachedBy [w] s ++ grammarsReachedBy [w] s
 -- **The prompt keeps whatever a load left it**: nothing calls this for a typed
 -- line, which is not a module and is not isolated.
 openedFrom :: Session -> [Opened]
-openedFrom = openedByModule preludeModule
+openedFrom s = openedWide preludeModule ++ openedByModule preludeModule s
 
 -- | A module read off the disc and ready to elaborate (MS11 phase 274).
 --
@@ -3111,7 +4715,10 @@ data ReadModule = ReadModule
     -- grouping is what 'loadProofModules' splits the file-wide lines from the
     -- block-scoped ones by, and it replaces an arithmetic that was already
     -- wrong where a base published one.
-  , readModuleItems  :: [Item]
+  , readModuleItems  :: [Placed]
+    -- ^ the module's items, **each with where it was written** (MS12 phase
+    -- 334, @~hcr2d@) — 'Placed' says why the position travels beside an item
+    -- and not inside it, and 'Unfinished' is where it arrives.
   }
   deriving (Eq, Show)
 
@@ -3126,6 +4733,148 @@ moduleLoaded n s = n `elem` sessionLoaded s
 -- there is nothing to put in it: nothing can import such a file.
 modulesLoaded :: Session -> [ModuleName]
 modulesLoaded = sessionLoaded
+
+-- | __Whether a load may leave a declaration behind__ (MS12 phase 315, his
+-- ruling of 2026-11-11: /"what if I am literally debugging my proofs?"/).
+--
+-- **It belongs to the act that was typed and not to the file** — his framing,
+-- @discussion\/partial-import.md@ §4 — so it is an argument of the load and
+-- never a field of the session: the prompt's @import@ is lenient, a module a
+-- rule base pulled in is not, and @thena-check@ is not. **And it reaches
+-- everything the act pulls in, however deep**, which is why it is threaded
+-- through the whole walk rather than decided per module: /"I think leniency
+-- all the day down makes sense."/
+--
+-- **A module's own @import@ line is unaffected either way.** What this governs
+-- is whether the /loader/ carries on past a declaration that did not go
+-- through, which is a question about this load and not about the file's text.
+data Leniency
+  = Strict
+    -- ^ a module that does not elaborate whole declares nothing — his ruling of
+    -- 2026-09-30, /"Atomic from now on"/, and still what a batch run gets
+  | Lenient
+    -- ^ it loads as far as it can, and what did not go through is recorded
+    -- rather than taking the module with it
+  deriving (Eq, Show)
+
+-- | __One declaration of a partly-loaded module that did not go in__ (MS12
+-- phase 315).
+--
+-- **The run's own answer is kept whole** rather than reduced to a reason: a
+-- frontend showing a ⚠️ node wants to say what it says at the prompt, and
+-- "Thena.Render"\'s 'Thena.Render.renderResponse' is already that renderer.
+data Unfinished = Unfinished
+  { unfinishedDeclares :: [String]
+    -- ^ what the item would have declared, as 'ProofLoaded' names what did —
+    -- **the words the file wrote**, so @broken@ and not
+    -- @test.modules.PartlyGood.broken@: a declaration takes its namespace from
+    -- the machine and the item's own name carries only what the author typed
+    -- in front of the colon ('declaredNames' is the whole of it)
+  , unfinishedAt       :: Maybe Pos
+    -- ^ __the line and column it was written at__ (MS12 phase 334, @~hcr2d@),
+    -- which is what makes a pane's row a destination rather than a sentence —
+    -- his ask of 2026-11-20, /"line number and column would be really nice"/.
+    -- The module's own file path is beside it already, so these two are the
+    -- whole of a place to go.
+    --
+    -- **'Nothing' is an item that is in no file**: a generated definition, or a
+    -- list of items a caller assembled and handed to 'loadProofItems'.
+    -- 'Placed' says why the position is carried beside an item rather than in
+    -- it.
+  , unfinishedWhy      :: NotDone
+    -- ^ why it did not finish.
+    --
+    -- **It was a whole 'Response' until MS12 phase 325**, under phase 315's
+    -- choice to keep the run's own answer rather than reduce it to a reason —
+    -- and that is what left a frontend no way to draw this but
+    -- 'Thena.Render.renderResponse', since a 'Response' is every answer the
+    -- prompt can give and a pane cannot lay out sixty-one of them. **Only two
+    -- of those answers could ever be in here**, which is what 'NotDone' is.
+  }
+  deriving (Eq, Show)
+
+-- | __Why an item in a partly-loaded module did not finish__ (MS12 phase 325).
+--
+-- **Two things can be, and the second is not a failure at all.** A run that
+-- stopped is 'ItStopped' — 'progress' has one return point and it builds a
+-- 'Ran', so a run's answer is always its messages, its warnings and a 'Stop' —
+-- and @:abandon@ typed while the item was elaborating is 'ItWasAbandoned', the
+-- user's own act.
+--
+-- **'Thena.View.Failure' is the view**, and its @Nature@ is the field that
+-- keeps a pane from drawing those two the same way.
+data NotDone
+  = ItStopped [Message] [Warning] Stop
+  | ItWasAbandoned
+  deriving (Eq, Show)
+
+-- | What an unfinished item carries, from the answer its run gave.
+--
+-- **The first arm is the only one a run can reach**: 'spending' returns through
+-- its own @stop@ helper and that builds a 'Ran'. A 'Response' that is not one
+-- did not come from a run, so there is no stop to report and none is invented.
+stoppedAs :: Response -> NotDone
+stoppedAs r = case r of
+  Ran msgs ws what -> ItStopped msgs ws what
+  _                -> ItStopped [] [] Completed
+
+-- | __A module that went in as far as it could__ (MS12 phase 315).
+--
+-- **Only a partly-loaded module has one of these.** A module that went in whole
+-- is in 'sessionLoaded' and nowhere else, which is what keeps the common case
+-- costing nothing and makes @moduleWhole@ the question it looks like.
+data Partly = Partly
+  { partlyModule     :: Maybe ModuleName
+    -- ^ the name it is reached by, where it has one — 'Importing''s
+    -- @importingName@ is 'Maybe' for the same reason, a file reached by a path
+    -- that is no module name having none
+  , partlyText       :: String
+    -- ^ the header's text, which is what every message about this load names it
+    -- by and what 'ProofLoaded' carries
+  , partlyUnfinished :: [Unfinished]
+    -- ^ in the order the file wrote them. **The first is the root and the rest
+    -- are pending** — his ruling of 2026-11-11, /"a module whose third
+    -- declaration broke shows one failure and forty-seven pending, not
+    -- forty-eight warnings"/ — and the order is the whole of how that is said,
+    -- because nothing works out /why/ anything failed.
+  }
+  deriving (Eq, Show)
+
+-- | __Which modules are partly in__ (MS12 phase 315), most recent first.
+modulesPartly :: Session -> [Partly]
+modulesPartly = sessionPartly
+
+-- | __How a module's load came out__ (MS12 phase 315) — the three-valued
+-- answer @~84j24@'s pane needs, where 'moduleLoaded' gives two.
+--
+-- **'Nothing' is absent, @Just Nothing@ is whole and @Just (Just p)@ is
+-- partial.** Flat rather than a type of its own because the two questions a
+-- frontend asks are /is it in/ and /what did not go in/, and both are reads of
+-- this one answer.
+modulePartly :: ModuleName -> Session -> Maybe Partly
+modulePartly n s = case [ p | p <- sessionPartly s, partlyModule p == Just n ] of
+  p : _ -> Just p
+  []    -> Nothing
+
+-- | __Did this module go in whole__ (MS12 phase 315).
+--
+-- **False for a module that is not in at all**, which is 'moduleLoaded''s job
+-- to tell apart: this is the second question and not a replacement for the
+-- first.
+moduleWhole :: ModuleName -> Session -> Bool
+moduleWhole n s = moduleLoaded n s && isNothing (modulePartly n s)
+
+-- | __What a module imports__ (MS12 phase 315), in written order.
+--
+-- **The edges of @~84j24@'s tree.** The closure is flattened into dependency
+-- order before it is walked, so the shape the user wrote is lost by the time
+-- anything lands — this is where it is kept, module by module, and a frontend
+-- draws the tree by following it from the one the user named.
+--
+-- **Empty for a module that is not in**, as 'declaredByModule' is, and empty
+-- for one that imports nothing.
+moduleImportsOf :: ModuleName -> Session -> [ModuleName]
+moduleImportsOf n s = concat [ ms | (m, ms) <- sessionImportsBy s, m == n ]
 
 -- | Which module declared this global, where one did (MS11 phase 280).
 --
@@ -3199,6 +4948,7 @@ interfaceOf items = Interface
   { interfaceExporting = moduleExporting items
   , interfacePrivate   = privateIn items ++ moduleHiding items
   , interfacePublic    = publicImports items
+  , interfaceImports   = moduleImports items
   , interfacePublishes = publicPushes items
   }
 
@@ -3216,6 +4966,11 @@ data Interface = Interface
     -- writers**, because the test is one test — 'exports' read the other way —
     -- and nothing downstream has a use for which word a name was kept back by;
     -- 'privateIn' and 'moduleHiding' answer that off the items
+  , interfaceImports   :: [ModuleName]
+    -- ^ __every module its header imports__ (MS12 phase 315), in written
+    -- order and whether or not it travels on. **The tree's edges**, which
+    -- 'interfacePublic' is not: a private import is still a dependency the
+    -- user drew and still a node @~84j24@'s pane has to show.
   , interfacePublic    :: [(ModuleName, Selection)]
     -- ^ which of its imports travel on
   , interfacePublishes :: [Published]
@@ -3250,34 +5005,39 @@ rolledBack before after =
 -- **A list and not a @Maybe@ since MS10 phase 254**, because a @namespace@
 -- block holds items of its own and the summary names what landed, wherever it
 -- was written.
-declaredNames :: Item -> [String]
-declaredNames = go []
+--
+-- **AND THE PREFIX IS AN ARGUMENT SINCE MS12 PHASE 336** (@~6g27s@): the loader
+-- walks into a block, so it asks this of a declaration written inside one, and
+-- the namespace that declaration landed in is the walk's to say. 'Landed' is
+-- the pair and 'landedNames' is what every summary calls.
+declaredNames :: [String] -> Item -> [String]
+declaredNames = go
   where
     -- **The namespace it was written in comes with it**, because @declared A.one@
     -- is what landed and @declared one@ would name a key the environment has
     -- not got.
     go ns (ItemNamespace g is) =
-      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
-    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+    go ns (ItemOpenIn _ is) = concatMap (go ns) (itemsIn is)
     -- **A private declaration is still declared**, and the summary says so: the
     -- file declared it and this module may use it (MS11 phase 286).
-    go ns (ItemPrivate is)  = concatMap (go ns) is
+    go ns (ItemPrivate is)  = concatMap (go ns) (itemsIn is)
     -- **And a declaration inside a block an act states is the module's** (MS11
     -- phases 291 and 292): where its names could be written is the act's
     -- business, and what the file declared is this list's.
-    go ns (ItemImport _ _ _ ds)  = concatMap (go ns) (concat ds)
-    go ns (ItemConsult _ _ ds) = concatMap (go ns) (concat ds)
+    go ns (ItemImport _ _ _ ds)  = concatMap (go ns) (itemsIn (concat ds))
+    go ns (ItemConsult _ _ ds) = concatMap (go ns) (itemsIn (concat ds))
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
 -- | How many top-level blocks an item holds, for the summary's count.
 blocksIn :: Item -> Int
 blocksIn i = case i of
   ItemBlock _        -> 1
-  ItemNamespace _ is -> sum (map blocksIn is)
-  ItemOpenIn _ is    -> sum (map blocksIn is)
-  ItemPrivate is     -> sum (map blocksIn is)
-  ItemImport _ _ _ ds  -> sum (map blocksIn (concat ds))
-  ItemConsult _ _ ds -> sum (map blocksIn (concat ds))
+  ItemNamespace _ is -> sum (map blocksIn (itemsIn is))
+  ItemOpenIn _ is    -> sum (map blocksIn (itemsIn is))
+  ItemPrivate is     -> sum (map blocksIn (itemsIn is))
+  ItemImport _ _ _ ds  -> sum (map blocksIn (itemsIn (concat ds)))
+  ItemConsult _ _ ds -> sum (map blocksIn (itemsIn (concat ds)))
   _                  -> 0
 
 -- | Every rule base this module consults, in written order (MS11 phase 273).
@@ -3293,14 +5053,14 @@ moduleConsults = concatMap go
     go i = case i of
       ItemConsult _ m ds -> m : inside ds
       ItemImport _ _ _ ds  -> inside ds
-      ItemNamespace _ is -> moduleConsults is
-      ItemOpenIn _ is    -> moduleConsults is
-      ItemPrivate is     -> moduleConsults is
+      ItemNamespace _ is -> moduleConsults (itemsIn is)
+      ItemOpenIn _ is    -> moduleConsults (itemsIn is)
+      ItemPrivate is     -> moduleConsults (itemsIn is)
       _                  -> []
     -- **A consult inside a block is still a file the load must read** (MS11
     -- phase 292): where it is in force is the block's business and whether the
     -- disc can be reached is this list's.
-    inside = maybe [] moduleConsults
+    inside = maybe [] (moduleConsults . itemsIn)
 
 -- | __Which bases a block of this file is searched against__, in written order
 -- (MS11 phase 292).
@@ -3316,12 +5076,12 @@ scopedConsults :: [Item] -> [ModuleName]
 scopedConsults = concatMap go
   where
     go i = case i of
-      ItemConsult _ m (Just is) -> m : scopedConsults is
+      ItemConsult _ m (Just is) -> m : scopedConsults (itemsIn is)
       ItemConsult _ _ Nothing   -> []
-      ItemImport _ _ _ ds         -> maybe [] scopedConsults ds
-      ItemNamespace _ is        -> scopedConsults is
-      ItemOpenIn _ is           -> scopedConsults is
-      ItemPrivate is            -> scopedConsults is
+      ItemImport _ _ _ ds         -> maybe [] (scopedConsults . itemsIn) ds
+      ItemNamespace _ is        -> scopedConsults (itemsIn is)
+      ItemOpenIn _ is           -> scopedConsults (itemsIn is)
+      ItemPrivate is            -> scopedConsults (itemsIn is)
       _                         -> []
 
 -- | __Which modules this file may name throughout__ (MS11 phase 291).
@@ -3348,11 +5108,11 @@ fileImports = concatMap go
   where
     go i = case i of
       ItemImport _ m sel Nothing  -> [(m, sel)]
-      ItemImport _ _ _ (Just is) -> fileImports is
-      ItemConsult _ _ ds      -> maybe [] fileImports ds
-      ItemNamespace _ is      -> fileImports is
-      ItemOpenIn _ is         -> fileImports is
-      ItemPrivate is          -> fileImports is
+      ItemImport _ _ _ (Just is) -> fileImports (itemsIn is)
+      ItemConsult _ _ ds      -> maybe [] (fileImports . itemsIn) ds
+      ItemNamespace _ is      -> fileImports (itemsIn is)
+      ItemOpenIn _ is         -> fileImports (itemsIn is)
+      ItemPrivate is          -> fileImports (itemsIn is)
       _                       -> []
 
 -- | __Every import in the file with the clause it wrote__, blocks included
@@ -3366,11 +5126,11 @@ importClauses :: [Item] -> [(ModuleName, Selection)]
 importClauses = concatMap go
   where
     go i = case i of
-      ItemImport _ m sel ds -> (m, sel) : maybe [] importClauses ds
-      ItemConsult _ _ ds    -> maybe [] importClauses ds
-      ItemNamespace _ is    -> importClauses is
-      ItemOpenIn _ is       -> importClauses is
-      ItemPrivate is        -> importClauses is
+      ItemImport _ m sel ds -> (m, sel) : maybe [] (importClauses . itemsIn) ds
+      ItemConsult _ _ ds    -> maybe [] (importClauses . itemsIn) ds
+      ItemNamespace _ is    -> importClauses (itemsIn is)
+      ItemOpenIn _ is       -> importClauses (itemsIn is)
+      ItemPrivate is        -> importClauses (itemsIn is)
       _                     -> []
 
 -- | __A @public import@ whose names this file's @exporting@ clause does not
@@ -3400,12 +5160,19 @@ unlistedTravelling s items = case moduleExporting items of
     | (m, sel) <- publicImports items
     , let travels = selects sel (reachedBy [whole m] s
                                    ++ grammarsReachedBy [whole m] s)
-    , let ns = nub [ top g | g <- travels, not (exports (Just es) g) ]
+    , let ns = nub [ top (asWritten s g)
+                   | g <- travels, not (exports (Just es) (asWritten s g)) ]
     , not (null ns)
     ]
   where
     -- The namespace a name would be listed under: its first step, or the name
     -- itself where it has none.
+    --
+    -- **Of the name as the importer writes it — MS12 phase 313.** A module's
+    -- declarations live under its own namespace, so the first step of a key is
+    -- the first step of that namespace and the warning named @test@ where it
+    -- means @Bit@. 'asWritten' is the same reading an @import@ clause gets, and
+    -- an @exporting@ list is written in the same words.
     top (GlobalName ps x) = case ps of { (q : _) -> q ; [] -> x }
 
 -- | __Which names an import's clause asked for that the module does not
@@ -3433,7 +5200,10 @@ unoffered s ims =
   , let offered = reachedBy [whole m] s ++ grammarsReachedBy [whole m] s
   , let missing = [ GlobalName ps x
                   | (ps, x) <- ns
-                  , not (any (coversName (ps, x)) offered) ]
+                  -- **Against the names as the importer writes them** (MS12
+                  -- phase 313) — 'asWritten' says why, and 'reachedBy' applies
+                  -- the clause itself the same way.
+                  , not (any (coversName (ps, x) . asWritten s) offered) ]
   , not (null missing)
   ]
 
@@ -3448,11 +5218,11 @@ moduleImports :: [Item] -> [ModuleName]
 moduleImports = concatMap go
   where
     go i = case i of
-      ItemImport _ m _ ds   -> m : maybe [] moduleImports ds
-      ItemConsult _ _ ds  -> maybe [] moduleImports ds
-      ItemNamespace _ is -> moduleImports is
-      ItemOpenIn _ is    -> moduleImports is
-      ItemPrivate is     -> moduleImports is
+      ItemImport _ m _ ds   -> m : maybe [] (moduleImports . itemsIn) ds
+      ItemConsult _ _ ds  -> maybe [] (moduleImports . itemsIn) ds
+      ItemNamespace _ is -> moduleImports (itemsIn is)
+      ItemOpenIn _ is    -> moduleImports (itemsIn is)
+      ItemPrivate is     -> moduleImports (itemsIn is)
       _                  -> []
 
 -- | __Which of this module's imports travel on to its own importers__ (MS11
@@ -3465,12 +5235,12 @@ publicImports :: [Item] -> [(ModuleName, Selection)]
 publicImports = concatMap go
   where
     go i = case i of
-      ItemImport Public m sel ds -> (m, sel) : maybe [] publicImports ds
-      ItemImport Own _ _ ds    -> maybe [] publicImports ds
-      ItemConsult _ _ ds     -> maybe [] publicImports ds
-      ItemNamespace _ is  -> publicImports is
-      ItemOpenIn _ is     -> publicImports is
-      ItemPrivate is      -> publicImports is
+      ItemImport Public m sel ds -> (m, sel) : maybe [] (publicImports . itemsIn) ds
+      ItemImport Own _ _ ds    -> maybe [] (publicImports . itemsIn) ds
+      ItemConsult _ _ ds     -> maybe [] (publicImports . itemsIn) ds
+      ItemNamespace _ is  -> publicImports (itemsIn is)
+      ItemOpenIn _ is     -> publicImports (itemsIn is)
+      ItemPrivate is      -> publicImports (itemsIn is)
       _                   -> []
 
 -- | __One thing a module hands on to whoever imports it__ (MS11 phase 288,
@@ -3502,11 +5272,11 @@ publicPushes = concatMap go
       ItemConsult Own _ ds    -> inside ds
       ItemImport Public m _ ds  -> PublishedFrom m : inside ds
       ItemImport Own _ _ ds     -> inside ds
-      ItemNamespace _ is   -> publicPushes is
-      ItemOpenIn _ is      -> publicPushes is
-      ItemPrivate is       -> publicPushes is
+      ItemNamespace _ is   -> publicPushes (itemsIn is)
+      ItemOpenIn _ is      -> publicPushes (itemsIn is)
+      ItemPrivate is       -> publicPushes (itemsIn is)
       _                    -> []
-    inside = maybe [] publicPushes
+    inside = maybe [] (publicPushes . itemsIn)
 
 -- | __Which bases a module that is in hands on, in order__ (MS11 phase 288,
 -- @~jmw4k@).
@@ -3565,14 +5335,15 @@ consultedPool s done = reverse . concatMap go
       -- once. 'moduleConsults' is still the list of files to read.
       ItemConsult _ m Nothing  -> [m]
       ItemConsult _ _ (Just _) -> []
-      ItemImport _ m _ ds        -> published m ++ maybe [] (concatMap go) ds
-      ItemNamespace _ is -> concatMap go is
-      ItemOpenIn _ is    -> concatMap go is
-      ItemPrivate is     -> concatMap go is
+      ItemImport _ m _ ds        ->
+        published m ++ maybe [] (concatMap go . itemsIn) ds
+      ItemNamespace _ is -> concatMap go (itemsIn is)
+      ItemOpenIn _ is    -> concatMap go (itemsIn is)
+      ItemPrivate is     -> concatMap go (itemsIn is)
       _                  -> []
 
     published m = case [ rm | rm <- done, readModuleName rm == Just m ] of
-      rm : _ -> concatMap brought (publicPushes (readModuleItems rm))
+      rm : _ -> concatMap brought (publicPushes (map placedItem (readModuleItems rm)))
       []     -> publishedBy m s
 
     brought (PublishedBase b) = [b]
@@ -3623,18 +5394,19 @@ privateIn :: [Item] -> [GlobalName]
 privateIn = concatMap (go [])
   where
     go ns (ItemNamespace g is) =
-      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
-    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+    go ns (ItemOpenIn _ is) = concatMap (go ns) (itemsIn is)
     -- **Everything inside, and a nested @private@ adds nothing**: the mark is
     -- already on, and the inner walk names the same declaration.
-    go ns (ItemPrivate is)  = concatMap (named ns) is
+    go ns (ItemPrivate is)  = concatMap (named ns) (itemsIn is)
     go _  _                 = []
 
     -- The names the declarations under a @private@ declare, at this prefix.
     named ns i = case i of
-      ItemNamespace g is -> concatMap (named (ns ++ nameSteps g ++ [nameWord g])) is
-      ItemOpenIn _ is    -> concatMap (named ns) is
-      ItemPrivate is     -> concatMap (named ns) is
+      ItemNamespace g is ->
+        concatMap (named (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+      ItemOpenIn _ is    -> concatMap (named ns) (itemsIn is)
+      ItemPrivate is     -> concatMap (named ns) (itemsIn is)
       _ -> [ GlobalName ns n | Just n <- [declaredName i] ]
 
 -- | __Whether an export list reaches this name__ (MS11 phase 285, @~jmw4k@).
@@ -3677,6 +5449,34 @@ coversName :: ([String], String) -> GlobalName -> Bool
 coversName (ps, x) g = steps (GlobalName ps x) `isPrefixOf` steps g
   where
     steps (GlobalName qs y) = qs ++ [y]
+
+-- | __A name as an importer of its module writes it__ (MS12 phase 313).
+--
+-- **A module's declarations live under its own namespace, and an importer gets
+-- a way to write them, not the namespace itself.** @Twins@'s @Bit@ is the key
+-- @test.modules.Twins.Bit.Bit@ and an importer writes @Bit@, because what the
+-- import gives them is an @open@ of that namespace ('opensFor'). So a clause —
+-- @import Twins ( Bit )@, @hiding ( Tri )@, an @exporting@ list read through
+-- 'selects' — is tested against this and not against the key.
+--
+-- **Each name under its OWN module**, which is the only reading that works for
+-- one passed on by a @public import@: it belongs to a third module and arrives
+-- under that module's word. 'moduleDeclaring' is the provenance.
+--
+-- **Unchanged for a name no module declared** — the prompt's, and the prelude's,
+-- which are the root's.
+asWritten :: Session -> GlobalName -> GlobalName
+asWritten s g = case holder of
+  Just m | Just rest <- stripPrefix (moduleNamespace m) (nameSteps g) ->
+    GlobalName rest (nameWord g)
+  _ -> g
+  where
+    -- **A grammar key is in neither table 'moduleDeclaring' reads** — @A.LC@ is
+    -- a key and @A.LC.LC@ is the datatype — so the grammar table answers for
+    -- it, which is 'grammarsReachedBy''s own asymmetry said once more.
+    holder = case moduleDeclaring g s of
+      Just m  -> Just m
+      Nothing -> listToMaybe [ m | (m, gs) <- sessionGrammarsBy s, g `elem` gs ]
 
 -- | A module reached with no clause on it (MS11 phase 306) — the prelude, and
 -- anything that is not an @import@ line.
@@ -3800,15 +5600,22 @@ dispatch s name arg = case name of
   -- parser what fits there ("Thena.Repl").
   ":parse" -> withArgument $ case break (== ' ') arg of
     (lang, rest)
-      | rootName lang `notElem` map grammarName (grammars machine) ->
+      -- **Asked through the walk and no longer by a root-name match** (MS12
+      -- phase 313): a language is under its module's namespace, so the word the
+      -- user writes is resolved where they stand — 'parseObject' and the
+      -- interactive mode's completion ask the same question the same way.
+      | Left _ <- grammarForTag (scope machine) (grammars machine) lang ->
           (s, Rejected (NoSuchLanguage lang))
       | null (dropWhile (== ' ') rest) -> (s { sessionParsing = Just lang }, ParsingEntered lang)
       | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
-  ":show"  -> case arg of
-    "" -> (s, Shown (cursor (development machine)))
-    _  -> showGlobal arg
+  -- **Both halves read the argument trimmed** (MS12 phase 311), for
+  -- 'opening''s reason: @:show@ takes a name, and @:show Nat @ asked after a
+  -- global whose word was @Nat @.
+  ":show"  -> case trimmed arg of
+    ""   -> (s, Shown (cursor (development machine)))
+    what -> showGlobal what
   -- The eliminator is not a global, so it is not reachable through @:show@
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
@@ -3816,14 +5623,14 @@ dispatch s name arg = case name of
   -- Only a datatype has rules, so this is not reachable through @:show@ and
   -- takes its own word, as @:elim@ does. **Not @:rules@**: that is the engine's
   -- rule base, and an instral rule is not an inference rule.
-  ":judgment" -> withArgument (showRules arg)
+  ":judgment" -> withArgument (showRules (trimmed arg))
   ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
   -- driver asks for the matches at the current state and shows them. Picking
   -- one and running its body is phase 16's.
   --
-  -- **The optional argument is a hint** (phase 17b), read exactly as @prove@\'s
+  -- **The optional argument is a hint** (phase 17b), read exactly as @step@\'s
   -- is. A hint partitions the base, so the two forms answer two questions:
   -- @:matches@ is what could be done here, @:matches ‹hint›@ is what could
   -- elaborate that.
@@ -3938,12 +5745,21 @@ dispatch s name arg = case name of
   -- op program and is written as the op is written. That also keeps @:abandon@
   -- (this proof) apart from @abandon@ (this hole), which are two different
   -- operations that thesis §2 gives one name.
-  ":theorem" -> withArgument theorem
+  -- **Refused while a rule is standing in a yield** (MS12 phase 309, his ruling
+  -- of 2026-11-11). It is here and not inside 'theorem' because the refusal is
+  -- about the machine rather than about the argument, so it is answered before
+  -- the name is even parsed.
+  -- **The refusal names the park where there is one to make** (MS12 phase 310):
+  -- a bare yield at the prompt can only be handed back, an import that is
+  -- standing can be put down instead.
+  ":theorem" | Engine.isYielding machine ->
+                 (s, Rejected (ProvingWhileYielding (importingText <$> sessionImporting s)))
+             | otherwise -> withArgument theorem
   "qed"      -> noArgument closeProof
   ":suspend" -> noArgument suspend
   ":resume"  -> withArgument (resume arg)
   ":abandon" -> noArgument abandonProof
-  ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
+  ":proofs"  -> noArgument (s, Proofs (currentQuest s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   -- **The session's trust level, and what the development rests on** (MS8
@@ -3986,7 +5802,21 @@ dispatch s name arg = case name of
     -- **Nothing is refused for an already-loaded module**: it is the no-op a
     -- diamond in the import graph gets, and "Thena.Files" answers it, because
     -- the walk that knows about deduplication is the one that reads files.
-    Just m  -> (s, ImportRequested m [])
+    Just m
+      -- **One import in flight — his ruling of 2026-11-11** (MS12 phase 309).
+      -- A suspended load holds the machine's program, its pool and its
+      -- concealment; a second one would have to displace all three and there
+      -- would be nothing to go back to.
+      | Just imp <- sessionImporting s ->
+          (s, Rejected (ImportInFlight (importingText imp)))
+      -- **A parked one is still one** (MS12 phase 310). Parking takes the
+      -- import off the wheel but leaves the pool, the held bases and the
+      -- concealment it is standing in, so a second load would displace exactly
+      -- what it expects to find when it is picked up again.
+      | (nm : _) <- [ importingText imp
+                    | Parked (AnImport imp) _ <- sessionSuspended s ] ->
+          (s, Rejected (ImportIsParked nm))
+      | otherwise -> (s, ImportRequested m [])
   -- **Refused while a proof is open, as @:consult@ is** — the base may not
   -- change under a half-built proof (the user, 2026-08-25). An @import@ is not,
   -- for the reason @:load proof@ is not: it declares and does not touch the
@@ -4036,11 +5866,12 @@ dispatch s name arg = case name of
   -- **A block typed at the REPL is played** (MS4 phase 45b), and it is how the
   -- REPL types the instruction language at all.
   --
-  -- **This is what makes standing inside a yield useful.** The driver's own
-  -- commands take /terms/ and /names/ — @goto h@ looks for a hole called @h@,
-  -- not for whatever @h@ is bound to — so nothing typed as a command can read a
-  -- suspended rule's locals. A block can: its operands are references, and with
-  -- 'Thena.Engine.load' prepending, the rule's environment is still there.
+  -- **This is what makes standing inside a yield useful**, and MS12 phase 324
+  -- narrowed it rather than removing it. A typed line is resolved with the
+  -- session's goals bound and nothing else, so it can reach a hole by name but
+  -- still cannot read a suspended rule's locals. A block can: its operands are
+  -- references, and with 'Thena.Engine.loadWith' prepending the instructions,
+  -- the rule's environment is still there.
   --
   -- > elaborate (do { h = here ; yield "look" ; goto h })
   -- > do { goto h }          -- reads the rule's own h
@@ -4059,14 +5890,21 @@ dispatch s name arg = case name of
     -- shares its environment, so what the rule bound is in scope and typed by
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
-      let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (rootReading (grammars machine)) (rootName "entry") (map fst bound) body of
-        Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is) of
+      let goals = Engine.goalEnv machine
+          -- **The rule\'s own bindings come FIRST and so win** (MS12 phase 324):
+          -- a lookup takes the nearest, and 'Thena.Engine.loadWith' puts the
+          -- session\'s goals on the end of the environment for the same reason.
+          bound = (if Engine.isYielding machine then env (exec machine) else [])
+                    ++ goals
+       in case resolveBlock (Reading (grammars machine) (globals machine)
+                                     (scope machine))
+                            (rootName "entry") (map fst bound) body of
+        Left errs -> (s, Failed (blockProblem (faultsIn Nothing [] errs)))
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] Nothing [] is Nothing []) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
-                              s { sessionMachine = load is machine } [] []
+                              s { sessionMachine = loadWith goals is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
@@ -4087,8 +5925,30 @@ dispatch s name arg = case name of
   -- after it. @retry@ is the precedent for a bare driver word that is not an op.
   "yield" -> noArgument $
     if Engine.isYielding machine
-      then progress (sessionFuel s)
-                    s { sessionMachine = Engine.resumeYield machine } [] []
+      then case progress (sessionFuel s)
+                         s { sessionMachine = Engine.resumeYield machine } [] [] of
+             -- **What the resumed program declared is the MODULE's** (MS12 phase
+             -- 309, @~3c2db@). This is the only word that hands a suspended
+             -- program control back, so it is the only line during which a
+             -- module's own program can declare anything — 'importingTheirs'
+             -- says why that is the test rather than something per line.
+             (s', r) | Just imp <- sessionImporting s' ->
+                         ( s' { sessionImporting = Just imp
+                                  { importingTheirs =
+                                      importingTheirs imp ++ declaredSince s s'
+                                  }
+                              }
+                           -- **A second stop says the import is STILL waiting**
+                           -- (MS12 phase 309). A bare yield message here would
+                           -- read as an ordinary rule handing control over, and
+                           -- the user would not know a module was still on the
+                           -- hook. Every other stop is left exactly as it came.
+                         , case r of
+                             Ran msgs ws (Yielded msg) ->
+                               ImportResumed (importingText imp) msgs ws msg
+                             _ -> r
+                         )
+                     | otherwise -> (s', r)
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
@@ -4125,8 +5985,27 @@ dispatch s name arg = case name of
 
 
     matching =
-      unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (development machine)))
+      [ MatchedRule nm k (groupParams grp) (lookup (nm, k) inferredTypes)
+      | ((nm, k), grp) <-
+          -- **A read-only query, so the counter goes nowhere** (MS12) — the
+          -- same bargain 'Thena.View.matchesView' writes out.
+          matchingRules (rules machine) (globals machine) (names machine)
+                        (cursor (development machine))
+      ]
+
+    -- **The type comes from inference and not from the file's declaration**
+    -- (his, 2026-11-19): /"There will always be one, because we do inference.
+    -- We will show not only user-written type when they wrote it, but when they
+    -- didn't, what the system inferred."/ It is keyed by name and arity —
+    -- 'Thena.Instral.Infer.Callable' — which is exactly the key a row has, so a
+    -- name carrying two arities gets the right type for each. Looking a
+    -- signature up by name alone, which is what 'baseSignatures' allows, could
+    -- not.
+    --
+    -- **It is READ and not worked out** (MS12 phase 323).
+    -- 'Thena.Engine.ruleTypes' is computed where the bases are installed, which
+    -- is where it can be, and this is a look.
+    inferredTypes = ruleTypes machine
 
     -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
     -- question they ask of a signature.
@@ -4136,10 +6015,20 @@ dispatch s name arg = case name of
     -- are one thing with and without a head (§1.1). The listing says which is
     -- which.
     --
-    -- **The signatures are worked out here rather than kept on the session.**
-    -- They are already recomputed at every load and a rule base is a few hundred
-    -- instructions; storing them would be session state that @:undo@ and every
-    -- snapshot would then have to carry.
+    -- **This one still infers per call, and that is a choice rather than the
+    -- policy it used to state** (MS12 phase 323). The paragraph here used to
+    -- argue that signatures should not be kept on the session at all;
+    -- 'Thena.Engine.ruleTypes' keeps them, so that claim is gone and is not to
+    -- be read back out of this comment.
+    --
+    -- **Why this command does not read that table**: the table is over the pool
+    -- and the bases its blocks hold, and this answers /what can I pass a
+    -- @Surface@ to from where I stand/, which is 'Thena.Engine.rules' — a
+    -- smaller set, since a held base answers nothing until its block pushes it.
+    -- Reading the table would quietly start listing callables that cannot be
+    -- called. Filtering it back down is possible and would be worth doing if
+    -- this were ever on a redraw path; it is a word a user types, and the
+    -- inference measures 0.7 ms over the shipped base (2026-11-19, 400 calls).
     byType verb question = case parseInstralType arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
@@ -4165,7 +6054,7 @@ dispatch s name arg = case name of
     proofUnderway = case (currentAttempt s, sessionSuspended s) of
       (Just att, _)    -> Just (ProofUnderway (attemptName att))
       (Nothing, [])    -> Nothing
-      (Nothing, ps)    -> Just (ProofsSuspended (map (attemptName . parkedAttempt) ps))
+      (Nothing, ps)    -> Just (ProofsSuspended (map parkedWord ps))
 
     -- | One kind, the paths it was given. **Rule bases take several and the
     -- other two take one**, which is not an accident of spelling: a load of
@@ -4234,10 +6123,16 @@ dispatch s name arg = case name of
     showGlobal what = case argumentNamed anywhere what of
       Left amb -> noGlobal what amb
       Right g  -> case lookupInductive g (globals machine) of
-        Just d  -> (s, ShownData d)
+        -- **With each constructor's plicities** (MS12 phase 320, `~td9j6`), so
+        -- that a brace a @data@ block wrote, or a @judgment@ block's
+        -- metavariable, prints back as one. 'Core' has no plicity, so without
+        -- this the answer contradicted what the elaborator does with the name.
+        Just d  -> (s, ShownData d
+                        [ (constructorName c, fromMaybe [] (lookup (Engine.AsGlobal (constructorName c)) (signatures machine)))
+                        | c <- inductiveConstructors d ])
         Nothing -> case lookupDefinition g (globals machine) of
           Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
-                           (fromMaybe [] (lookup g (signatures machine)))
+                           (fromMaybe [] (lookup (Engine.AsGlobal g) (signatures machine)))
                                       (definitionType d) (Just (definitionBody d)))
           Nothing -> case lookupConstant g (globals machine) of
             Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
@@ -4401,19 +6296,60 @@ dispatch s name arg = case name of
         , definitionType d
         )
 
-    suspend = case sessionWork s of
-      Scratch -> (s, Rejected NotProving)
-      Attempting att ->
-        ( cleared { sessionSuspended =
-                      Parked att (snapshotOf machine) : sessionSuspended s }
+    -- **Innermost first, exactly as @:abandon@ is** (MS12 phase 310): a lemma
+    -- opened inside a standing import is what @:suspend@ puts down while it is
+    -- open, and the import is what it puts down once there is no lemma. One
+    -- word for /put down what I am on/, and 'currentQuest' is the one place
+    -- that says which that is.
+    --
+    -- **PARKING AN IMPORT IS WHAT MAKES THE LEMMA POSSIBLE — HIS RULING OF
+    -- 2026-11-11**, and the sequence is his: yielded at the prompt → park the
+    -- quest → @:theorem@ the lemma → @qed@, which lands it as a name → pick the
+    -- quest back up → @yield@. /"There is a step to park the current 'quest'
+    -- and that is done manually, so I think the opposite should be manual
+    -- also."/ **So @qed@ does not pop it back**: a boundary that unstacked
+    -- implicitly would be a second driver underneath the first, which is what
+    -- the first principle warns about.
+    --
+    -- **It is the same two lines as a proof's**, which is the point of 'Quest':
+    -- the suspended load is already standing in the live machine's program and
+    -- frames, so 'snapshotOf' carries it and 'restore' hands it back. Nothing
+    -- is copied out of the machine and no second snapshot type was needed.
+    --
+    -- **The pool, the held bases and the concealment are LEFT IN FORCE.** A
+    -- parked import is still an import in the middle of being elaborated — his
+    -- word for the state after the park is /limbo/, /"in the middle of an
+    -- import and proving nothing"/ — and putting them back would mean the
+    -- lemma is proved in a scope the module cannot see. It is also why a second
+    -- @import@ stays refused while one is parked ('ImportIsParked').
+    suspend = case currentQuest s of
+      Nothing -> (s, Rejected NotProving)
+      Just q@(AProof att) ->
+        ( cleared { sessionSuspended = Parked q (snapshotOf machine) : sessionSuspended s }
         , Suspended (attemptName att)
+        )
+      Just q@(AnImport imp) ->
+        ( cleared { sessionSuspended = Parked q (snapshotOf machine) : sessionSuspended s
+                  , sessionImporting = Nothing
+                  }
+        , ImportParked (importingText imp)
         )
 
     -- Abandoning drops the proof; suspending keeps it. Same exit, different
     -- list — which is the whole difference between the two commands.
+    -- **Innermost first** (MS12 phase 309): a lemma opened inside a suspended
+    -- import is what @:abandon@ gives up while it is open, and the import is
+    -- what it gives up once there is no lemma. One word for /give up what I am
+    -- on/, and nothing has to say which kind of thing that is.
     abandonProof = case sessionWork s of
-      Scratch -> (s, Rejected NotProving)
       Attempting att -> (cleared, Abandoned (attemptName att))
+      -- **It asks rather than answers** (MS12 phase 317). Giving the item up
+      -- lets the rest of the module in, which is several responses; the session
+      -- is left exactly as it stands and 'Thena.Driver.abandonItem' does the
+      -- whole of it behind @following@.
+      Scratch | Just imp <- sessionImporting s ->
+                  (s, AbandonRequested (importingText imp))
+              | otherwise -> (s, Rejected NotProving)
 
     -- Leave proof mode, putting the machine back on a fresh scratch
     -- development. **The environment and the counter are not touched**, which
@@ -4426,19 +6362,34 @@ dispatch s name arg = case name of
             , sessionWork = Scratch
             }
 
+    -- **One word picks up either kind** (MS12 phase 310, his /"one list one
+    -- word"/): the list is matched on 'parkedWord', which is a theorem's name
+    -- or the header's text an import was reached by. **For a proof this is the
+    -- comparison that was here before** — @:theorem@ mints a root name, so the
+    -- dotted form and the word are the same string.
+    --
+    -- **Refused while the session is on a quest, whichever kind.** Picking one
+    -- up installs a program and a development, so there has to be nowhere for
+    -- the one you are on to go: a proof says so with 'AlreadyProving', and a
+    -- standing import with 'ImportInFlight', whose message already says to park
+    -- it. Nothing is stacked implicitly, which is the ruling parking rests on.
     resume what =
-      case break ((== rootName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+      case break ((== what) . parkedWord) (sessionSuspended s) of
         (_, [])          -> (s, Rejected (NoSuchProof what))
-        (before, Parked att at : after)
-          | Attempting cur <- sessionWork s ->
-              (s, Rejected (AlreadyProving (attemptName cur)))
-          | otherwise ->
-              ( s { sessionMachine = restore at machine
-                  , sessionWork = Attempting att
-                  , sessionSuspended = before ++ after
-                  }
-              , Resumed (attemptName att)
-              )
+        (before, Parked q at : after) -> case currentQuest s of
+          Just (AProof cur)  -> (s, Rejected (AlreadyProving (attemptName cur)))
+          Just (AnImport cur) -> (s, Rejected (ImportInFlight (importingText cur)))
+          Nothing ->
+            let picked = s { sessionMachine = restore at machine
+                           , sessionSuspended = before ++ after
+                           }
+             in case q of
+                  AProof att ->
+                    (picked { sessionWork = Attempting att }, Resumed (attemptName att))
+                  AnImport imp ->
+                    ( picked { sessionImporting = Just imp }
+                    , ImportPickedUp (importingText imp)
+                    )
 
     -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
     -- and nothing about that needs a theorem to be open.
@@ -4470,11 +6421,19 @@ dispatch s name arg = case name of
     -- @:step@ can watch it as it watches @data@. The argument is raw text taken
     -- from a line, which is 'Thena.Core.Term.nameFromText''s one job.
     --
+    -- **Through 'trimmed', because @open@ takes a name** (MS12 phase 311). It
+    -- dropped the leading spaces only, so @open Nat @ asked for a namespace
+    -- whose word was @Nat @ and was refused — and a trailing space is invisible
+    -- in an editor and survives in a saved script, so the line below it failed
+    -- as out of scope with nothing on screen to say why. @import@ and
+    -- @consult@ took their name through 'trimmed' already; this is the same
+    -- convention and not a second one.
+    --
     -- **Its effect runs to the end of the session** (phase 247) — @opened@ is not
     -- backtrackable — so a prompt @open@ behaves as the last @open@ in a loaded
     -- file does, and nothing distinguishes the two.
     opening = withArgument $
-      let g  = nameFromText (dropWhile (== ' ') arg)
+      let g  = nameFromText (trimmed arg)
           -- **It says so, as @data@ does.** A file's @open@ is silent because the
           -- load reports per declaration; a line typed at the prompt that answered
           -- nothing at all would leave the user unable to tell it took, and the
@@ -4524,6 +6483,33 @@ dispatch s name arg = case name of
     -- succeed while owing one; reporting a type for a development that does not
     -- check would be the gap @ms3\/CLOSEOUT.md@ item 25 describes, one command
     -- further on.
+    -- | **An undetermined implicit becomes a quantifier** (MS12 phase 320,
+    -- `~td9j6`). @:infer@ rewinds the development, so a hole the elaboration
+    -- claimed and did not solve is gone by the time the answer is printed —
+    -- and the answer mentions it. Before a name EXPANDed there were no such
+    -- holes and the question never came up; now @:infer S-refl@ is exactly
+    -- this case, and left alone it printed the hole as a bare variable.
+    --
+    -- **Quantifying is the truthful reading of the answer**: the type is
+    -- @sub ?a ?a1 S@ /for some/ @?a@ and @?a1@, which is what a @∀@ over them
+    -- says. They are implicit because the positions they came from are, so
+    -- 'Thena.Render.signature' prints them in braces.
+    --
+    -- **The names are the holes'**, @a@, @a1@, not the declaration's @Γ@, @T@:
+    -- a signature records which positions are implicit and not what their
+    -- binders were called, so the better names are not reachable from here.
+    quantifyUnknowns dev ty =
+      let claims = [ (v, i, dom) | Component.Claim v i dom <- chainOf (flatten dev) ]
+          loose  = [ c | c@(v, _, _) <- claims, v `elem` freeVars ty ]
+       in ( map (const Implicit) loose
+          , foldr (\(v, i, dom) acc -> Pi i dom (close v acc)) ty loose
+          )
+
+    chainOf p = case p of
+      Under c rest   -> c : chainOf rest
+      Pending _ rest -> chainOf rest
+      Trailing _     -> []
+
     inferSurface t =
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
@@ -4553,8 +6539,10 @@ dispatch s name arg = case name of
                     -- **The two agree up to conversion, not syntactically**, and
                     -- they print the same.
                     (Right _, _) -> case expectedType (cursor dev) of
-                      Just ty -> (back, InferredSurface t
-                                          (whnf (globals m') (focusContext dev) ty))
+                      Just ty ->
+                        let (ps, gen) = quantifyUnknowns dev
+                                          (whnf (globals m') (focusContext dev) ty)
+                         in (back, InferredSurface t ps gen)
                       -- Unreachable as the program is written — the focus is the
                       -- component @Elaborate@ was pointed at — but the cursor
                       -- type admits it and inventing an answer would be worse.
@@ -4658,12 +6646,15 @@ dispatch s name arg = case name of
     -- the split into a word and an argument run was 62b's shape and an entry has
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
-    line = case instralEntry (grammars machine) (rules machine) (name ++ " " ++ arg) of
+    line = case instralEntry (grammars machine) (globals machine) (scope machine)
+                             (rules machine)
+                             (Engine.goalEnv machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionFuel s) s { sessionMachine = load is machine } [] []
+        progress (sessionFuel s)
+                 s { sessionMachine = loadWith (Engine.goalEnv machine) is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -4700,9 +6691,10 @@ dispatch s name arg = case name of
 -- ask for a name are **rules**, in @rules\/standard.thena.rules@, and are
 -- absent for the paragraph above's reason.
 --
--- **@prove@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
--- rule over @prim-prove@, at which point the paragraph above started applying
--- to it and nothing noticed — the same phase left @prove ‹hint›@ and
+-- **@step@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
+-- rule over @prim-step@, at which point the paragraph above started applying
+-- to it and nothing noticed — the same phase left @prove ‹hint›@, the word
+-- @step@ carried until phase 346, and
 -- @:matches ‹hint›@ here after retiring hints. @declare@ and @quantify@ were
 -- missing for the opposite reason: they are the driver's own and had never been
 -- added. **All four were found by crossing this list against @dispatch@ by
@@ -4720,7 +6712,12 @@ commandSummary =
   , ("cross type / cross val",   "move into a term")
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
-  , ("goto-named \"‹hole›\"",      "move to a hole by name")
+    -- **@goto@ is listed as of MS12 phase 324**, when the prompt began binding
+    -- every goal to a variable of its name: it was absent because the word took
+    -- something only a rule body held, which is no longer true and was the whole
+    -- reason a reader had to reach for the searching one.
+  , ("goto ‹goal›",              "move to a hole or guess by its name")
+  , ("goto-named \"‹hole›\"",      "search the development for that name")
   , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" core`‹S›`",  "add a ∀-binder above the focus")
@@ -4754,9 +6751,9 @@ commandSummary =
   , (":run / :run ‹n›",          "let it run on / for n instructions")
   , (":theorem ‹x› : ‹T›",      "start a proof")
   , (":goal ‹T›",                "discard everything and start a scratch goal")
-  , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
-  , (":proofs",                  "the current proof and the suspended ones")
-  , (":abandon",                 "give up the current proof")
+  , (":suspend / :resume ‹name›", "put a proof or an import aside / take it up again")
+  , (":proofs",                  "what is being worked on, and what is parked")
+  , (":abandon",                 "give up what is being worked on")
   , (":undo",                    "take back the last line")
   , (":extract",                 "the term the development stands for")
   , (":revalidate",              "recheck the whole development")
@@ -4886,6 +6883,78 @@ moduleFromSteps ps x = ModuleName (ps ++ [x])
 moduleText :: ModuleName -> String
 moduleText (ModuleName ws) = intercalate "." ws
 
+-- | __The namespace a module's declarations go into__ (MS12 phase 313, his
+-- ruling of 2026-11-12).
+--
+-- **The module's own name, step for step**: a file's declarations belong to the
+-- file. The header already had to agree with the path (@~r58qh@) and was read
+-- for nothing but a printed line; this is what it now means, and it is what
+-- makes @which names are this module's@ a fact about the names rather than a
+-- difference taken against the session (`~grjdm`, `~wk7cm`, `~fts8c`).
+--
+-- **THE PRELUDE IS AT THE ROOT, AND IT IS THE ONE PLACE THAT IS SAID.** Not an
+-- exemption bolted on: the prelude is already the one module nobody imports —
+-- @~xdt8c@ makes it every module's implicit import and 'openedFrom' is "the
+-- prelude's alone" — and its names are the theory's rather than a library's.
+-- A kernel tactic builds an @Eq@ application in 'Core'
+-- ("Thena.Global.Generate"), so putting the prelude under a namespace would have
+-- the kernel naming a module and make the equality the theory needs depend on
+-- what some file declared. They sit where @String@, @Char@ and @Int@ sit, which
+-- are root constants 'concealedFrom' already exempts for this same reason.
+--
+-- **A module may still declare its own @Eq@**, because that one is under its own
+-- namespace and collides with nothing.
+moduleNamespace :: ModuleName -> [String]
+moduleNamespace m@(ModuleName ws)
+  | m == preludeModule = []
+  | otherwise          = ws
+
+-- | __The module's namespace as a name to enter__, or 'Nothing' where there is
+-- no namespace to enter (MS12 phase 313).
+--
+-- 'Thena.Instral.Ops.EnterNamespace' takes a name and pushes its whole path, so
+-- a module @a.b.C@ is the name @C@ under the steps @a.b@. **'Nothing' is the
+-- prelude**, whose declarations are the root's — 'moduleNamespace' says why.
+moduleGlobal :: ModuleName -> Maybe GlobalName
+moduleGlobal m = case reverse (moduleNamespace m) of
+  w : before -> Just (GlobalName (reverse before) w)
+  []         -> Nothing
+
+-- | __Everything under a module's namespace, opened__ (MS12 phase 313).
+--
+-- **No interface applied**, which is what makes it right for the two callers
+-- that use it: a scoped @import@'s block, where 'Reveal' has already said which
+-- keys may be reached and the @open@ only says how they are written, and the
+-- prompt, which is not a module and is not isolated.
+--
+-- **Empty for a module whose declarations are the root's**, there being nothing
+-- to open: the root is the last rung of 'Thena.Core.Term.globalUnder'\'s own
+-- walk, so an @open@ of it would offer what the walk has already tried.
+openedWide :: ModuleName -> [Opened]
+openedWide m = case moduleNamespace m of
+  [] -> []
+  ps -> [Opened ps Nothing [] []]
+
+-- | __The session can write this module's names unqualified__ (MS12 phase 313).
+--
+-- **The prompt is not a module and is not isolated**: a line you type reaches
+-- everything the session holds, which is what lets you poke at a module you
+-- have just loaded, and before this phase it did so because every file declared
+-- at the root. **Wide, with no interface applied**, for the same reason —
+-- @private@ says what an importing FILE may name.
+--
+-- **The next module to load does not see it**, because a load builds its own
+-- 'Thena.Core.Term.scopeOpens' from 'openedFrom' and what its own imports
+-- bring. **Every door a module can come in by calls this**: 'moduleDeclared'
+-- for one that was reached by a name, and 'walkProofModules' for a file whose
+-- path is no module name, which is recorded nowhere and still has to be
+-- reachable from the prompt that asked for it.
+openingModule :: ModuleName -> Session -> Session
+openingModule m s = s
+  { sessionMachine = (sessionMachine s)
+      { scope = (scope (sessionMachine s))
+          { scopeOpens = openedWide m ++ scopeOpens (scope (sessionMachine s)) } } }
+
 -- | Where to look for it, **relative to the project's source root and never to
 -- the file doing the importing** (his, recalled from Lean 4 and recorded in
 -- @~5x7f9@).
@@ -4937,7 +7006,7 @@ data RuleFileError
   | RuleSyntaxError SyntaxError
     -- ^ it did not lex or parse. The position is inside, and it is the true
     -- line: the header is blanked rather than dropped so that nothing shifts
-  | RuleIllFormed [RuleError]
+  | RuleIllFormed [RuleFault]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
   | RuleSelectsUnoffered ModuleName [GlobalName]
     -- ^ **an import's clause named something the module does not offer** (MS11
@@ -5059,12 +7128,12 @@ breakOn needle = go ""
 -- nothing.
 ruleBaseOfDecls
   :: ((ModuleName, Selection) -> [GlobalName])
-  -> (ModuleName -> ([FilePath], [GlobalName]))
-  -> [Grammar] -> [GlobalName] -> FilePath
+  -> (ModuleName -> ([FilePath], [GlobalName], [Opened]))
+  -> [Grammar] -> GlobalEnv -> InScope -> FilePath
   -> String -> Maybe String
   -> [RawDecl] -> Either RuleFileError RuleBase
-ruleBaseOfDecls reveals brought gs conc path nm desc raws = do
-  (sigs, fns, rs) <- resolveAll reveals brought gs conc raws
+ruleBaseOfDecls reveals brought gs env conc path nm desc raws = do
+  (sigs, fns, rs) <- resolveAll reveals brought gs env conc path raws
   Right (ruleBase nm desc path sigs fns rs)
 
 -- | A rule file's header and its declarations, parsed and /not/ resolved.
@@ -5107,10 +7176,10 @@ parseInstralType src = do
   ts <- mapLeft LineSyntax (tokensOf src)
   t  <- mapLeft (LineSyntax . ParseFailed) (parseInstralTy ts)
   case resolveTy "a query" t of
-    Left e         -> Left (LineIllFormed [e])
+    Left e         -> Left (LineIllFormed (faultsIn Nothing [] [e]))
     -- @()@ says /nothing is left/, which is not a type a value can have — the
     -- same refusal it gets as a parameter (MS5 phase 67).
-    Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
+    Right Nothing  -> Left (LineIllFormed (faultsIn Nothing [] [UnitInsideAType "a query"]))
     Right (Just u) -> Right u
 
 -- | **Every declaration of a rule file beside the scope it stands in** (MS10
@@ -5141,10 +7210,10 @@ parseInstralType src = do
 -- table further over.
 scopedDecls
   :: ((ModuleName, Selection) -> [GlobalName])
-  -> (ModuleName -> ([FilePath], [GlobalName]))
-  -> [Grammar] -> [GlobalName] -> [RawDecl]
+  -> (ModuleName -> ([FilePath], [GlobalName], [Opened]))
+  -> [Grammar] -> GlobalEnv -> InScope -> [RawDecl]
   -> [(Reading, [FilePath], RawDecl)]
-scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } []
+scopedDecls reveals brought gs env conc = go conc []
   where
     go _ _ []  = []
     go sc ps (d : rest) = case d of
@@ -5170,9 +7239,17 @@ scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } [
       -- **And its clause narrows the frame** (MS11 phase 306, @~htngj@), which
       -- is 'reachedBy' being one function again: a scoped import reveals
       -- exactly what a file-wide one does, less what its clause keeps out.
+      --
+      -- **AND IT OPENS THE MODULE'S NAMESPACE FOR THE BLOCK — MS12 PHASE 313.**
+      -- A module's declarations live under its own name now, so lifting the
+      -- concealment is not enough to let the block write them: the pair is the
+      -- same two gates a surface file's scoped import gets, and 'opensFor' is
+      -- what a file-wide one gets.
       DeclImport _ pth x sel (Just inner) ->
-        go (revealing (reveals (moduleFromSteps pth x, sel)) sc) ps inner
-          ++ go sc ps rest
+        let m' = moduleFromSteps pth x
+            sc' = (revealing (reveals (m', sel)) sc)
+                    { scopeOpens = openedWide m' ++ scopeOpens sc }
+         in go sc' ps inner ++ go sc ps rest
       DeclConsult _ _ _ Nothing -> go sc ps rest
       -- **AND A SCOPED CONSULT IS TWO FRAMES OVER ITS BLOCK** (MS11 phase 300,
       -- his ruling of 2026-11-06). The names the group published are revealed
@@ -5188,12 +7265,27 @@ scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } [
       -- first and what it consults sits under it: 'surfaceProgram' spells the
       -- same sentence for a proof file's block.
       DeclConsult _ pth x (Just inner) ->
-        let (paths, names) = brought (moduleFromSteps pth x)
-         in go (revealing names sc) (ps ++ reverse paths) inner
-              ++ go sc ps rest
-      _                 -> (Reading gs sc, ps, d) : go sc ps rest
+        let (paths, names, opens) = brought (moduleFromSteps pth x)
+            sc' = (revealing names sc) { scopeOpens = opens ++ scopeOpens sc }
+         in go sc' (ps ++ reverse paths) inner ++ go sc ps rest
+      _                 -> (Reading gs env sc, ps, d) : go sc ps rest
 
-    brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
+    -- **THE PATH IS RESOLVED WHERE THERE IS SOMETHING TO RESOLVE IT AGAINST —
+    -- MS12 PHASE 313.** It was taken verbatim, which was right while every
+    -- module declared at the root and is wrong now that a module's languages
+    -- live under its own name: @open A@ in a base that imports @a.b.C@ means
+    -- @a.b.C.A@, and the surface language's own @Open@ op has always resolved it
+    -- that way ('Thena.Global.Env.namespaceUnder', which is
+    -- 'Thena.Core.Term.globalUnder' and so honours the opens the file already
+    -- has). **Verbatim is still the answer when nothing answers**: the shipped
+    -- base is read before the prelude declares its first name, so a path that
+    -- reaches nothing is an @open@ that brings nothing in, and the author sees
+    -- the tag it failed to shorten.
+    brings o sc = sc { scopeOpens = map (resolved sc) (openedOf o) ++ scopeOpens sc }
+
+    resolved sc o = case namespaceUnder sc env (openedPath o) of
+      Right ps -> o { openedPath = ps }
+      Left _   -> o
 
 -- | What an @open@ line in a rule file said, as one 'Opened' per namespace it
 -- named (MS10 phase 267).
@@ -5226,34 +7318,43 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 -- 'scopedDecls' is the walk that pairs the two.
 resolveAll
   :: ((ModuleName, Selection) -> [GlobalName])
-  -> (ModuleName -> ([FilePath], [GlobalName]))
-  -> [Grammar] -> [GlobalName] -> [RawDecl]
+  -> (ModuleName -> ([FilePath], [GlobalName], [Opened]))
+  -> [Grammar] -> GlobalEnv -> InScope -> FilePath -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
-resolveAll reveals brought gs conc raws =
+resolveAll reveals brought gs env conc path raws =
   case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
        ) of
-    ([], [])     -> Right (sigs, fns, ok)
+    ([], [])     -> Right ([ (n, t) | (_, n, t) <- sigs ], fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
+    -- | **A fault about a declaration this file holds, placed in this file**
+    -- (MS12 phase 349, @~8w6qw@). The position is the declaration's own: a
+    -- clause's for a rule or a function, the signature's name for a signature.
+    -- 'Thena.Rules.resolveRule' and 'Thena.Rules.validate' place their own,
+    -- because only they know which written instruction a fault is about.
+    here at = Just (Ops.Origin path at)
     -- **Each declaration beside the scope it was written in.** An @open@ is not
     -- a declaration to resolve, so it does not appear here — what it says is
     -- already in the reading beside everything under it.
-    decls = scopedDecls reveals brought gs conc raws
+    decls = scopedDecls reveals brought gs env conc raws
 
     (ruleErrs, ok)  =
-      partitionEithers [ pushing ps <$> resolveRule rd r | (rd, ps, DeclRule r) <- decls ]
+      partitionEithers [ pushing ps <$> resolveRule path rd r | (rd, ps, DeclRule r) <- decls ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
     (fnErrs, fns)   =
-      partitionEithers [ pushing ps <$> resolveFunction rd f
+      partitionEithers [ pushing ps <$> resolveFunction path rd f
                        | (rd, ps, DeclFunction f) <- decls ]
     -- **A signature needs no scope**: @instral@'s types are its own words, and
     -- a tag never appears in one.
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | (_, _, DeclSignature g) <- decls ]
+      partitionEithers
+        [ either (Left . faultIn (here at) []) Right (resolveSignature g)
+        | (_, _, DeclSignature g@(RawSignature at _ _)) <- decls
+        ]
 
     -- **WHAT A @consult … where@ BLOCK COMPILES TO** (MS11 phase 300, his
     -- ruling of 2026-11-06): a push of the base at the front of the body and a
@@ -5282,7 +7383,7 @@ resolveAll reveals brought gs conc raws =
     -- backtracking and a call could run either. A function has one clause and no
     -- head, which is exactly what that is not.
     collisions =
-      [ RuleAndFunction n (length (ruleParams f))
+      [ RuleFault (ruleOrigin f) (RuleAndFunction n (length (ruleParams f)))
       | f <- fns
       , let n = nameDotted (ruleName f)
       , any (\r -> ruleName r == ruleName f
@@ -5320,7 +7421,7 @@ resolveAll reveals brought gs conc raws =
     -- dead code the author can see is not, and a real overlap checker is the
     -- coverage question stage c opens rather than something owed here.
     overlapping =
-      [ FunctionClauseUnreachable n (length (ruleParams f))
+      [ RuleFault (ruleOrigin f) (FunctionClauseUnreachable n (length (ruleParams f)))
       | (i, f) <- zip [0 :: Int ..] fns
       , let n = nameDotted (ruleName f)
       , any (\g -> ruleName g == ruleName f
@@ -5328,10 +7429,13 @@ resolveAll reveals brought gs conc raws =
                      && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
       ]
 
+    -- **The place is the SECOND signature's**, which is the one in the way —
+    -- the same choice 'overlapping' makes for a function's second clause (MS12
+    -- phase 349).
     dups =
-      [ DuplicateSignature n (length (sigParams t))
-      | (i, (n, t)) <- zip [0 :: Int ..] sigs
-      , (n', t') <- take i sigs
+      [ faultIn (here at) [] (DuplicateSignature n (length (sigParams t)))
+      | (i, (at, n, t)) <- zip [0 :: Int ..] sigs
+      , (_, n', t') <- take i sigs
       , n' == n
       , length (sigParams t') == length (sigParams t)
       ]
@@ -5417,10 +7521,10 @@ readSpread s sp = map (entry InPool) (spreadPool sp)
 --
 -- **AND WHAT THE BASES IT CONSULTS HAND IT IS IN SCOPE, SINCE MS11 PHASE 298**
 -- — 'handedTo' is the walk, and the whole group's texts are what it walks.
-statedConcealment :: Session -> [(FilePath, String)] -> String -> [GlobalName]
+statedConcealment :: Session -> [(FilePath, String)] -> String -> InScope
 statedConcealment s group src =
-  concealedFrom (either (const []) id (ruleBaseFileImports src)
-                   ++ handedTo group src) s
+  scopeImporting (either (const []) id (ruleBaseFileImports src)
+                    ++ handedTo group src) s
 
 -- | __A @public consult@ with nothing left to say__ (MS11 phase 298, his ruling
 -- of 2026-11-06).
@@ -5496,7 +7600,8 @@ readStated s gs group held' path src = do
       ((m, missing) : _) -> Left (RuleSelectsUnoffered m missing)
       []                 ->
         ruleBaseOfDecls (revealedToBase s) (groupsFor s held' path) gs
-                    (concealedFrom (rawFileImports raws ++ handedTo group src) s)
+                    (globals (sessionMachine s))
+                    (scopeImporting (rawFileImports raws ++ handedTo group src) s)
                     path nm desc raws
 
 -- | __'unofferedBy' over a rule file's own declarations__ (MS11 phase 306).
@@ -5791,7 +7896,7 @@ loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Se
 loadRuleDecls s ps =
   loadReadBases s [ ( path
                     , [ PublicConsultIdle (moduleText m) | m <- rawPublicConsults ds ]
-                    , concealedFrom (rawFileImports ds) s
+                    , scopeImporting (rawFileImports ds) s
                     , InPool
                     , stated path nm desc ds )
                   | (path, nm, desc, ds) <- ps ]
@@ -5818,8 +7923,9 @@ loadRuleDecls s ps =
       -- same gap one line over and not a new one. **It has had no caller since
       -- it was written** — see the paragraph above — and closing it means
       -- giving it the disc, which is what 'readStated' is for.
-      []         -> ruleBaseOfDecls (revealedToBase s) (const ([], [])) gs
-                      (concealedFrom (rawFileImports ds) s) path nm desc ds
+      []         -> ruleBaseOfDecls (revealedToBase s) (const ([], [], [])) gs
+                      (globals (sessionMachine s))
+                      (scopeImporting (rawFileImports ds) s) path nm desc ds
 
 -- | Install bases that have already been built, or none of them.
 --
@@ -5870,7 +7976,7 @@ consultReadBases s =
 -- reach, where in the session it goes, and either the base or why it was
 -- refused.
 type ReadBase =
-  (FilePath, [Warning], [GlobalName], Standing, Either RuleFileError RuleBase)
+  (FilePath, [Warning], InScope, Standing, Either RuleFileError RuleBase)
 
 -- | __Where a base in one push goes, and what it was fetched with__ (MS11
 -- phase 301; the 'Bool' it replaces is phase 300's).
@@ -5908,9 +8014,8 @@ installReadBases below heldBelow s = go []
         Right bss ->
           case snd (inferProgram (allSignatures everything) (scoped ++ concat bss)) of
             []   ->
-              ( s { sessionMachine = (sessionMachine s)
-                                       { pool = pool'
-                                       , held = heldNow ++ heldBelow } }
+              ( s { sessionMachine =
+                      setBases pool' (heldNow ++ heldBelow) (sessionMachine s) }
               -- **In the order the files were read**, which is the order they
               -- go into the pool: a warning about the third base of a push is
               -- read after the first two.
@@ -5995,7 +8100,7 @@ installReadBases below heldBelow s = go []
     -- holds somewhere, and is told so when it runs rather than when it loads.
     blocksOf reach (conc, st, b) =
       case surfaceBlocks (Reading (grammars (sessionMachine s))
-                                  rootScope { scopeConcealed = [conc] })
+                                  (globals (sessionMachine s)) conc)
                          (rootName (baseName b))
                          (concatMap ruleBody bodies) of
       Left errs -> Left (basePath b, errs)
@@ -6271,7 +8376,7 @@ loadSource s0 = go s0 1 [] . lines
           acc'       = resp : acc
        in case resp of
             -- **The five a caller would have to follow with IO**, which is
-            -- exactly 'Thena.Files.following's list \8212 kept here as a match
+            -- exactly 'Thena.Files.following's list — kept here as a match
             -- rather than by asking that function, because this module is
             -- below it.
             --
@@ -6337,6 +8442,12 @@ boundary resp = case resp of
   Abandoned {} -> True
   Suspended {} -> True
   Resumed {}   -> True
+  -- **Parking an import crosses one for the same reason @:suspend@ does** (MS12
+  -- phase 310): the development you were standing in is exchanged for another,
+  -- and stepping back across the exchange would put a line's snapshot under the
+  -- wrong one.
+  ImportParked {}   -> True
+  ImportPickedUp {} -> True
   _            -> False
 
 -- | Which responses end a load.
@@ -6428,10 +8539,22 @@ unrecorded resp = case resp of
 -- 'Thena.Core.Term.shortestEnding''s reason: the announcement cannot then drift
 -- from what the reader does, and a word two namespaces would answer is an
 -- ambiguity rather than a shadowing, which the resolver already says.
+--
+-- **ASKED OF THE NAME AS WRITTEN, NOT OF THE KEY — MS12 PHASE 313.** A
+-- declaration's key carries the namespace it was declared in, and a module is a
+-- namespace now: asking @globalUnder@ about @Shadow.Foo@ from inside @Shadow@
+-- tries @Shadow.Shadow.Foo@ and the root, neither of which anything declares, so
+-- every announcement stopped. **What shadows is the word**, which is the name
+-- relative to where it is being declared — @innermostOf@ is that namespace, the
+-- same one 'Thena.Engine.declaredIn' put on the front.
 shadowed :: GlobalEnv -> InScope -> GlobalName -> Maybe GlobalName
-shadowed before sc g = case globalUnder (knownIn before) sc g of
+shadowed before sc g = case globalUnder (knownIn before) sc written of
   Right g' | g' /= g -> Just g'
   _                  -> Nothing
+  where
+    written = case stripPrefix (innermostOf sc) (nameSteps g) of
+      Just rest -> GlobalName rest (nameWord g)
+      Nothing   -> g
 
 -- | Every word a step's new names took, said as warnings.
 --
@@ -6448,7 +8571,63 @@ shadowings before sc gs =
   [ NameShadows g hid | g <- nub gs, Just hid <- [shadowed before sc g] ]
 
 progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
-progress fuel = spending fuel 0
+progress fuel s msgs warns =
+  let (s', r) = spending fuel 0 s msgs warns
+   in (s', warnedOf (tookAWord s s') r)
+
+-- | A run's response with more warnings in it.
+--
+-- **'spending' has one return point** — its own @stop@, which builds a 'Ran' —
+-- so this reaches every answer a run gives and the fallthrough is for the
+-- type's sake rather than for a case that arises (@.claude\/HAZARDS.md@ carries
+-- what rests on that one return point).
+warnedOf :: [Warning] -> Response -> Response
+warnedOf [] r = r
+warnedOf ws r = case r of
+  Ran msgs was stop -> Ran msgs (was ++ ws) stop
+  _                 -> r
+
+-- | **The binders this line wrote that took a word already in scope where they
+-- landed** — his ruling of 2026-11-20, /THERE IS ONE NAME/, part three, in two
+-- shapes: plain, and naming the references left pointing at the binder that
+-- went dead.
+--
+-- **Asked at the one door a line goes through, and asked of the binder.** Every
+-- act that can bind — @intro \"x\"@, @assume@, @claim@, @define@, a λ an
+-- elaboration introduces, a method a tactic builds — comes through 'progress',
+-- so the question is asked once here rather than by each op remembering to;
+-- 'shadowings' does the same for a declaration one layer up. **And it is asked
+-- of the binders, not of the focus**: the focus may end anywhere a line likes,
+-- and merely walking into a scope where a word was written twice is not an
+-- event to report.
+--
+-- **\"This line\" is the name counter**, which only 'Thena.Core.Term.fresh'
+-- moves: a variable at or past where the counter stood when the line started
+-- was minted by it. Navigation mints nothing, so navigation warns about
+-- nothing.
+--
+-- **A word the system supplies never gets here**, because it was made free
+-- where the binder landed ('Thena.Core.Context.writableIn'). What reaches this
+-- is a word a user wrote twice, which is theirs to write (MS4 phase 41f).
+--
+-- **The same sentence is said once.** A line that builds several arms re-binds
+-- the author's word in each of them — a split's target and a friendly index are
+-- re-bound under it on purpose (@~8v3pg@, @~pmpqg@) — and the warning names no
+-- position, so a second copy of it carries nothing. Whether a tactic's own
+-- deliberate re-binding should warn at all is on @.claude\/CLOSEOUT.md@.
+tookAWord :: Session -> Session -> [Warning]
+tookAWord before after =
+  nub
+    [ warning x refs anyRef
+    | (Ident x, named, anyRef) <- wordsTaken isNew development'
+    , let refs = [ r | Ident r <- named ]
+    ]
+  where
+    development' = rebuild (cursor (development (sessionMachine after)))
+    isNew v = v >= fst (fresh (Engine.names (sessionMachine before)))
+    warning x refs anyRef
+      | anyRef    = BinderShadowsReferenced x refs
+      | otherwise = BinderShadows x
 
 -- | 'progress' with the fuel it was given and what it has spent so far.
 --
@@ -6482,13 +8661,21 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
-  Engine.Declaring d m -> case declare (globals m) (names m) d of
+  Engine.Declaring d cps m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1)
       | exhausted -> stop installed msgs took (Paused spent)
       | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
-        installed = m { globals = g, names = n1 }
+        -- **A constructor's braces are recorded here** (MS12 phase 320,
+        -- `~td9j6`), at the same point in the same door that installs the
+        -- declaration, and only for a constructor that wrote one: a block
+        -- whose every position is explicit adds nothing, which keeps a
+        -- generated grammar's dozens of constructors out of the table.
+        installed = m { globals = g, names = n1
+                      , signatures =
+                          [ (Engine.AsGlobal nm', ps) | (nm', ps) <- cps, Implicit `elem` ps ]
+                            ++ signatures m }
         -- **Every name the declaration added is asked, and the word it takes
         -- besides** (MS10 phase 264; the word at MS11 phase 305). A @data@
         -- block's names all land inside its own namespace, so no name it
@@ -6529,6 +8716,21 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   --
   -- **It says nothing**, per his instruction: the command that ran it reports
   -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
+  -- **A NAME MAY BE DECLARED ONCE — MS12 PHASE 313 (`~fts8c`).** @:theorem@
+  -- asked this and so did @data@; the general door did not, so a second
+  -- @declare@ of a taken name was accepted, 'Env.addDefinition' consed it in
+  -- front of the first, and every lookup answered with the newer one — which
+  -- left definitions and certified theorems behind it mentioning a name whose
+  -- meaning had changed under them. **'Thena.Global.Env' rests its stored
+  -- classification of what holds a trusted claim on exactly this**, saying so in
+  -- as many words, and until this phase nothing enforced it here.
+  --
+  -- **Refused, which is what the two doors that already asked do.** Replacement
+  -- would mean retracting the earlier entry and withdrawing everything that
+  -- rested on it, and the environment only ever grows (@spec/interface.md@).
+  Engine.Defining nm _ _ _ m
+    | isDeclared nm (globals m) ->
+        stop (load [] m) msgs warns (Refused (AlreadyDeclared nm))
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)
     -- **A token class is checked once the kernel has accepted it** (MS6 phase
@@ -6592,7 +8794,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                  , names      = n1
                  , signatures = if Explicit `elem` ps && Implicit `notElem` ps
                                   then signatures m
-                                  else (nm, ps) : signatures m
+                                  else (Engine.AsGlobal nm, ps) : signatures m
                  }
           -- **The word this definition takes, if it takes one** (MS10 phase
           -- 264): this is the door a theorem in a file comes in by, and the
@@ -6711,7 +8913,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] Nothing [] is Nothing []) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
@@ -6878,21 +9080,20 @@ nameOf m d = shortestEnding known (scope m) g
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
 
--- | Drain the iterator (§7.6). The REPL shows the whole match list rather than
--- a few with more on scroll, because MS1's terminal has no scroll and a list
--- silently cut short would be a worse lie than a long one. The incremental
--- reads — 'Thena.Rules.next' and 'Thena.Rules.hasNext' — are what phase 16's
--- peek and a real frontend use, and this is written in terms of the first so
--- that the display and the dispatcher walk the same iterator.
-unfoldIter :: RuleIter -> [Rule]
-unfoldIter it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : unfoldIter rest
 
 -- | Parse a term of an installed language and say what it is (MS6 phase 102).
+-- **THE WRITTEN NAME IS RESOLVED TO THE PARSER'S KEY — MS12 PHASE 313.** A
+-- language lives under its module's namespace now, so @:parse Tm ( … )@ after
+-- an @import@ writes a word and means @a.b.C.Tm@; 'grammarForTag' is the one
+-- walk that answers that, the same one a tagged literal asks. **The written
+-- name is kept when nothing answers**, so a refusal still names what the user
+-- typed.
 parseObject :: Machine -> String -> String -> Response
 parseObject m lang text =
-  case Earley.parse (earleyRules (grammars m)) (Earley.StartAt lang) (Earley.pieces text) of
+  case Earley.parse (earleyRules (grammars m)) (Earley.StartAt key) (Earley.pieces text) of
     Right t  -> ParsedObject t
     Left why -> ObjectUnparsed lang text why
+  where
+    key = either (const lang) grammarKey
+                 (grammarForTag (scope m) (grammars m) lang)
 

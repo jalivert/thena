@@ -1,0 +1,10 @@
+module test.modules.GrammarScopes where
+
+-- A production that writes one metavariable with a binder free in it and
+-- again without: `ScopesDiffer`, inside a production.
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app : x as binder     -> ( x . M[x] M )

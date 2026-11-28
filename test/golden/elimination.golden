@@ -11,9 +11,6 @@ proving noEq : ∀ (n : Nat) -> Fin n -> Nat
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> eliminate-core core`i`
 stuck: eliminating at indices needs Eq.Eq, which is not declared
 thena spine> eliminate-core core`n`
@@ -44,122 +41,66 @@ thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
-thena spine> along
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-fill ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-fit-core ‹f›
-fit-core ‹f›
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-induction-core ‹t›
-case-core ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-run-block ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> eliminate-core core`Type₀`
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
 thena spine> eliminate-core core`succ`
@@ -190,9 +131,6 @@ proving tied : ∀ (m : Nat) -> Below (succ m) (fz m) -> Nat
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> eliminate-core core`b`
 subgoals: bzMethod, bsMethod
 thena spine> :where
@@ -203,8 +141,8 @@ path
 context
   m : Nat
   b : Below (succ m) (fz m)
-  bzMethod : ∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat
-  bsMethod : ∀ (m1 : Nat) (j : Fin m1) -> Below m1 j -> (∀ (q : Eq {0} Nat m1 (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) (m1 (succ m)) q) j) (fz m) -> Nat) -> ∀ (q : Eq {0} Nat (succ m1) (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat
+  bzMethod : ∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) ((succ m) (succ m†)) q) (fz m)) (fz m†) -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (q : Eq {0} Nat m (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) (m (succ m†)) q) j) (fz m†) -> Nat) -> ∀ (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) ((succ m) (succ m†)) q) (fs m j)) (fz m†) -> Nat
 type
   Nat
 thena spine> :abandon
@@ -218,10 +156,6 @@ thena spine> intro
 stuck: no clause of intro applies here
 thena spine> intro
 stuck: no clause of intro applies here
-thena spine> into
-thena spine> along
-thena core> along
-stuck: that move is for the chain, and the focus is a core term
-thena core> eliminate-core core`c`
+thena spine> eliminate-core core`c`
 stuck: not in scope: c
-thena core> :quit
+thena spine> :quit

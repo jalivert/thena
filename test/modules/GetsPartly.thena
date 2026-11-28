@@ -1,0 +1,6 @@
+module test.modules.GetsPartly where
+
+import test.modules.PartlyGood
+
+mine : test.modules.PartlyGood.Flag.Flag
+mine = test.modules.PartlyGood.Flag.up

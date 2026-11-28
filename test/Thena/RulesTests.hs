@@ -22,10 +22,10 @@ import Thena.Core.Term
   , rootScope
   )
 import Thena.Development.Component (Component (..))
-import Thena.Development.Cursor (Cursor, crossType, enter)
+import Thena.Development.Cursor (Cursor, crossType, enter, into)
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (nat, natDecl, opensIn)
-import Thena.Standard (expectedBase)
+import Thena.Standard (aRule, expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
@@ -49,6 +49,7 @@ import Thena.Global.Env
   )
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , CoreP (..)
   , Instr (..)
   , Op
   , Operand (..)
@@ -68,10 +69,13 @@ import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleBase
   , RuleError (..)
+  , faultWhy
   , clauses
   , RuleIter
   , allRules
   , hasNext
+  , iterRules
+  , Match (..)
   , matches
   , next
   , ruleBase
@@ -89,6 +93,7 @@ tests =
     , producesTests
     , returnTests
     , dataTests
+    , focusTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -107,6 +112,13 @@ arrow s t = Pi (Ident "_") s (close (fst (fresh 0)) t)
 holeAt :: Core -> Cursor
 holeAt ty = enter (Under (Claim v (Ident "goal") ty) (Trailing (Free v)))
   where v = var
+
+-- | The hole inside the guess — where @attack@ now leaves the cursor, and the
+-- only position the introduction tactics act at (MS12 phase 357).
+readyAt :: Core -> Cursor
+readyAt ty = case into (guessAt ty) of
+  Right cur -> cur
+  Left e    -> error ("could not enter the guess: " ++ show e)
 
 -- | @? x ≐ (? y : ty . y) : ty . x@ — what @attack@ makes.
 guessAt :: Core -> Cursor
@@ -131,7 +143,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches expectedBase env cur))
+matching env cur = map nameOf (drain (matches expectedBase env 0 cur))
 
 nameOf :: Rule -> String
 nameOf = nameDotted . ruleName
@@ -139,9 +151,19 @@ nameOf = nameDotted . ruleName
 -- | Walk an iterator to the end with 'next' alone, which is how the driver's
 -- display walks it.
 drain :: RuleIter -> [Rule]
-drain it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : drain rest
+drain = iterRules
+
+-- | The same walk, keeping what each match bound (MS12).
+--
+-- **It is told the counter to walk from**, because 'next' matches the clause
+-- again from whatever it is handed (MS12, @~thwhg@) — so walking an iterator
+-- built at 9 from 0 would answer matches nothing ever made.
+-- **And the cursor to match the focus against** (MS12 phase 358): the head
+-- includes the @at@ pattern, so re-making a match re-matches that too.
+drainMatches :: Int -> Cursor -> RuleIter -> [Match]
+drainMatches k cur it = case next emptyGlobals k cur it of
+  Nothing         -> []
+  Just (mt, rest) -> mt : drainMatches k cur rest
 
 -- --------------------------------------------------------------------------
 -- What matches where (§7.6)
@@ -158,44 +180,73 @@ matchTests =
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
-          @?= ["solve", "regret", "prove"] ++ walkers
+          @?= ["rename", "solve", "regret", "step", "step", "step"] ++ walkers
 
-    , testCase "a guess at a Π offers intro as well" $
+      -- **A guess is no longer where @intro@ is offered** (MS12 phase 357): the
+      -- introductions act at the hole inside it, so what a guess offers is the
+      -- two tactics that act on a guess.
+    , testCase "a guess at a Π offers solve and regret, and not intro" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+          @?= ["rename", "solve", "regret", "step", "step", "step"] ++ walkers
+
+      -- **Two @intro@ rows, not one** (MS12 phase 326): the nullary pair and the
+      -- @intro "a"@ pair his ask of 2026-11-20 added. A row per name and arity,
+      -- and every matching rule is always offered.
+    , testCase "the hole inside a guess at a Π offers intro" $
+        matching emptyGlobals (readyAt (arrow type0 type0)) @?= holeRulesAtPi
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
+      -- **AND THE CORE PATTERN REDUCES TOO** (MS12 phase 360): @by-induction@
+      -- is in this listing, so the pattern over the goal catches a definition
+      -- unfolding to a @∀@ exactly as the predicate does. That is his rule of
+      -- 2026-09-20 — a term is tried as written and then reduced and tried
+      -- again, one rule for every pattern — and @spec/machine.md@ §8 claimed
+      -- the opposite until this phase measured it.
     , testCase "a goal type that only reduces to a Π still matches" $
-        matching withArrow (guessAt (Global (rootName "Arrow") []))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+        matching withArrow (readyAt (Global (rootName "Arrow") []))
+          @?= holeRulesAtPi
 
     , testCase "and does not, in an environment where it does not unfold" $
-        matching emptyGlobals (guessAt (Global (rootName "Arrow") []))
-          @?= ["solve", "regret", "prove"] ++ walkers
+        matching emptyGlobals (readyAt (Global (rootName "Arrow") []))
+          @?= everyHoleRule
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
       -- unpassable — which is exactly the bug this phase found in
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
-        matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+        matching emptyGlobals (readyAt (Let (Ident "x") type0 type1 (close var type0)))
+          @?= holeRulesWithIntro
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
       -- is the direction that /is/ guaranteed for these two rules, and the one
       -- the let bug broke — the op could not do what no head could offer.
     , testCase "where the let clause is offered, intro succeeds" $
-        let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
+        let cur = readyAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches expectedBase emptyGlobals cur)
-                @?= ["intro", "solve", "regret", "prove"] ++ walkers
+              nameOf `map` drain (matches expectedBase emptyGlobals 0 cur)
+                @?= holeRulesWithIntro
               ranOk (machineAt cur [Do (Ops.IntroLet Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
-        ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
+        ranOk (machineAt (readyAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
+
+      -- **THE COST OF THE HEAD BEING @at ? _ : _@** (MS12 phase 357). The
+      -- root of a development has the thesis's @?x : S . x@ shape too, so the
+      -- head passes there and the op refuses: a binder put at the root would
+      -- change what the development proves, which is what @attack@ is for.
+      -- Offered and refused, rather than not offered — §7.3's "failing in a
+      -- body is already handled".
+    , testCase "and at a hole that is not inside a guess it is offered, then refuses" $
+        do
+          matching emptyGlobals (holeAt (arrow type0 type0)) @?= holeRulesAtPi
+          case runOut (machineAt (holeAt (arrow type0 type0))
+                                 [Do (Ops.IntroPi Nothing)]) of
+            Left NotReadyToIntroduce -> pure ()
+            other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- Every head that asks about a component fails in the core fragment, so
       -- what is left is the rules with no head at all. Definite, not
@@ -241,18 +292,18 @@ iteratorTests =
   testGroup
     "the iterator"
     [ testCase "hasNext agrees with next, at every position" $
-        let walk it = case next it of
+        let walk it = case next emptyGlobals 0 (holeAt type0) it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches expectedBase emptyGlobals (holeAt type0))
+         in walk (matches expectedBase emptyGlobals 0 (holeAt type0))
 
       -- **Drained by name rather than by a count**, since MS4 phase 49c: a guess
       -- offers @solve@, @regret@, @prove@ and the λ case's two recursive
       -- helpers, and a fixed number of @next@es would have to move every time a
       -- rule is added.
     , testCase "an empty iterator has nothing" $
-        let it = matches expectedBase emptyGlobals (guessAt type0)
-         in case drop (length (["solve", "regret", "prove"] ++ walkers)) (drain it) of
+        let it = matches expectedBase emptyGlobals 0 (guessAt type0)
+         in case drop (length (["rename", "solve", "regret", "step", "step", "step"] ++ walkers)) (drain it) of
               [] -> pure ()
               rs -> assertFailure ("expected no more, got " ++ show (map nameOf rs))
 
@@ -261,7 +312,7 @@ iteratorTests =
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches expectedBase emptyGlobals (holeAt type0)
+        let it = matches expectedBase emptyGlobals 0 (holeAt type0)
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
@@ -278,7 +329,15 @@ iteratorTests =
 -- helper turns each name into the pattern that binds it and the fixtures below
 -- read exactly as they did.
 named :: String -> [Name'] -> [Instr] -> Rule
-named n ps = Rule (rootName n) (map Ops.PVar ps) []
+named n ps = aRule (rootName n) (map Ops.PVar ps) []
+
+-- | What 'validate' found, without the place it found it at (MS12 phase 349).
+--
+-- Every rule here is built by hand and so is in no file ('Thena.Instral.Ops.ruleOrigin'
+-- is 'Nothing'); what these cases are about is which fault, and the crossing of
+-- a fault against a real file's lines is "Thena.ViewTests"'.
+whys :: Rule -> [RuleError]
+whys = map faultWhy . validate
 
 type Name' = String
 
@@ -302,7 +361,7 @@ validateTests =
       -- line with — recorded here so the disappearance is deliberate rather
       -- than a check quietly lost.
     , testCase "nor a binding false" $
-        validate (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
+        whys (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
           @?= [ReservedName (rootName "r") "false"]
     , testCase "and an ordinary name is untouched" $
         validate (named "r" ["t"] [Bind (Ops.PVar "x") Nothing Ops.Here]) @?= []
@@ -310,11 +369,11 @@ validateTests =
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
     , testCase "define-data in a body is rejected" $
-        validate (named "bad" [] [Do (Ops.DefineData someData)])
+        whys (named "bad" [] [Do (Ops.DefineData someData)])
           @?= [DeclarationInBody (rootName "bad") 0]
 
     , testCase "binding an op that produces nothing is rejected" $
-        validate (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
+        whys (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
           @?= [BoundNonProducing (rootName "bad") 0 "x"]
 
     , testCase "binding an op that produces something is fine" $
@@ -322,8 +381,8 @@ validateTests =
           @?= []
 
     , testCase "a Ref to nothing is rejected" $
-        validate (named "bad" [] [Do (Ops.Say (Ref "z"))])
-          @?= [UnboundInRule (rootName "bad") 0 "z"]
+        whys (named "bad" [] [Do (Ops.Say (Ref "z"))])
+          @?= [UnboundInRule (rootName "bad") 0 "z" TString]
 
     , testCase "a parameter binds it" $
         validate (named "ok" ["z"] [Do (Ops.Say (Ref "z"))]) @?= []
@@ -338,17 +397,17 @@ validateTests =
 
       -- A later Bind does not: the environment is built as the body runs.
     , testCase "a later Bind does not" $
-        validate
+        whys
           (named "bad" []
             [ Do (Ops.Say (Ref "z"))
             , Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             ])
-          @?= [UnboundInRule (rootName "bad") 0 "z"]
+          @?= [UnboundInRule (rootName "bad") 0 "z" TString]
 
       -- Every error, not the first: a rule author fixing one at a time would
       -- reload once per mistake.
     , testCase "all three are reported, with their positions" $
-        validate
+        whys
           (named "bad" []
             [ Bind (Ops.PVar "x") Nothing Ops.Attack
             , Do (Ops.DefineData someData)
@@ -356,7 +415,7 @@ validateTests =
             ])
           @?= [ BoundNonProducing (rootName "bad") 0 "x"
               , DeclarationInBody (rootName "bad") 1
-              , UnboundInRule (rootName "bad") 2 "z"
+              , UnboundInRule (rootName "bad") 2 "z" TString
               ]
 
     , testCase "validateBase checks every rule" $
@@ -397,8 +456,8 @@ dataTests =
     , -- An unbound name inside a literal is the body's mistake and is caught
       -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
       testCase "an unbound name inside a list is refused at load" $
-        validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
-          @?= [UnboundInRule (rootName "r") 0 "nope"]
+        whys (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
+          @?= [UnboundInRule (rootName "r") 0 "nope" TString]
 
       -- **The five destructors are gone** (MS5 phase 86): @list-head@,
       -- @list-tail@, @pair-first@, @pair-second@ and @option-value@. What they
@@ -418,6 +477,80 @@ dataTests =
       -- question, it does not fail.
       testCase "and a value of the wrong kind fits neither" $
         clauseFor [VText "a"] @?= []
+
+    , -- **The environment the match built rides out with the clause** (MS12,
+      -- §8's /the environment a match built is carried, never recomputed/).
+      -- 'Thena.Rules.clauses' has to match to choose a clause at all, and it
+      -- used to answer the clause alone — leaving "Thena.Engine" to run the
+      -- same match a second time on entry and a third in @seedFor@. This is
+      -- the answer being kept, which is what makes the body's environment and
+      -- the clause's choice one event instead of two.
+      testCase "the iterator carries what the match bound" $
+        envFor [VList [VText "a", VText "b"]]
+          @?= [[("x", VText "a"), ("xs", VList [VText "b"])]]
+    , -- A clause whose patterns bind nothing is not a missing environment: it
+      -- is matching no names, which answers none.
+      testCase "and a clause that binds nothing carries an empty one" $
+        envFor [VList []] @?= [[]]
+    , -- **The name counter rides out with the candidate too** (MS12, §8). A
+      -- list pattern mints nothing, so this candidate reports the counter the
+      -- search was handed, unchanged.
+      testCase "and the counter the search was handed rides out with it" $
+        namesFor 9 [VList [VText "a", VText "b"]] @?= [9]
+
+    , -- **NO TWO CANDIDATES OF ONE FORK HAND OUT ONE TOKEN** (MS12, @~thwhg@),
+      -- which the binder patterns of MS12 phase 355 are what make visible: a
+      -- core binder pattern opens a scope, so each candidate mints, and each is
+      -- taken from the counter as it stands then. Entered in turn from 9, the
+      -- two open at 9 and at 10.
+      --
+      -- **It is the re-match and not the candidate list that makes this true.**
+      -- 'Thena.Rules.clauses' also runs the counter along its candidates, but
+      -- nothing reads those stored counters: 'next' re-makes every match from
+      -- the counter it is handed, and 'RuleIter' exports no field, so the
+      -- threading in 'clauses' is only what the fallback in 'remade' answers
+      -- with when a re-match fails. That is the shape his ruling of 2026-11-26
+      -- chose and @~thwhg@'s definition records it.
+      testCase "two candidates of one fork open at different tokens" $
+        openedAt 9 (peeling 9 [VTerm aPi])
+          @?= [ VTerm (Free (fst (fresh 9)))
+              , VTerm (Free (fst (fresh 10)))
+              ]
+
+    , -- **AND THE RE-MATCH DRAWS A DIFFERENT TOKEN**, which is the other half
+      -- of @~thwhg@ made visible: the fork drew at 9 and the alternative is
+      -- entered at 60, so the body it binds is opened at 60. The abandoned
+      -- branch's spent tokens are never re-drawn.
+      testCase "an alternative taken later is opened at a later token" $
+        fmap (lookup "e" . matchEnv . fst)
+             (next emptyGlobals 60 (holeAt type1) (peeling 9 [VTerm aPi]))
+          @?= Just (Just (VTerm (Free (fst (fresh 60)))))
+
+    , -- **AN ALTERNATIVE IS MATCHED AGAIN WHEN IT IS TAKEN** (MS12, @~thwhg@,
+      -- his ruling of 2026-11-26). The match made at the fork is what says the
+      -- clause is a candidate at all — 'hasNext' decides @Choice@ against
+      -- @Call@ and cannot answer without it — but the counter does not go
+      -- backwards (§7.4), so by the time backtracking reaches an alternative
+      -- the abandoned branch has minted past everything the fork drew. The
+      -- match the body runs with is therefore drawn when the alternative is
+      -- taken, not when the fork was made.
+      --
+      -- **Nothing mints in a pattern yet**, so what is observable is the
+      -- counter the match answers: built at 9, taken at 60, it answers 60.
+      -- §8's binder patterns are what make this show up as a token.
+      testCase "an alternative is matched from the counter it is taken at" $
+        fmap (matchNames . fst)
+             (next emptyGlobals 60 (holeAt type1)
+                   (splitting 9 [VList [VText "a", VText "b"]]))
+          @?= Just 60
+
+    , -- And it is the same clause bound the same way: re-matching re-draws the
+      -- tokens and changes nothing else.
+      testCase "and it binds what it bound at the fork" $
+        fmap (matchEnv . fst)
+             (next emptyGlobals 60 (holeAt type1)
+                   (splitting 9 [VList [VText "a", VText "b"]]))
+          @?= Just [("x", VText "a"), ("xs", VList [VText "b"])]
     ]
   where
     run is = runOut (machineIn emptyGlobals (holeAt type1) is)
@@ -435,18 +568,72 @@ dataTests =
     -- pieces while it is there.
     shapes =
       ruleBase "shapes" Nothing "" [] []
-        [ Rule (rootName "shape") [Ops.PList [] Nothing] []
+        [ aRule (rootName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
-        , Rule (rootName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
+        , aRule (rootName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
     clauseFor vs =
       [ w
-      | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
+      | r <- drain (clauses [shapes] emptyGlobals 0 (holeAt type1)
                             (rootName "shape") vs)
       , Do (Ops.Say (Lit (VText w))) <- ruleBody r
       ]
+
+    -- The same two clauses with patterns that BIND, so that what the match
+    -- answered can be looked at and not only which clause it chose.
+    binders =
+      ruleBase "binders" Nothing "" [] []
+        [ aRule (rootName "split") [Ops.PList [] Nothing] []
+            [Do (Ops.Say (Lit (VText "empty")))]
+        , aRule (rootName "split")
+                [Ops.PList [Ops.PVar "x"] (Just (Ops.PVar "xs"))] []
+            [Do (Ops.Say (Lit (VText "cons")))]
+        ]
+
+    envFor = map matchEnv . matchesFor 0
+
+    namesFor k vs = map matchNames (matchesFor k vs)
+
+    matchesFor k vs =
+      drainMatches k (holeAt type1)
+                     (clauses [binders] emptyGlobals k (holeAt type1)
+                              (rootName "split") vs)
+
+    splitting k vs =
+      clauses [binders] emptyGlobals k (holeAt type1) (rootName "split") vs
+
+    -- **Two clauses that both match and both MINT** — a core binder pattern
+    -- opens a scope, and opening one is where a pattern spends the counter.
+    peelers =
+      ruleBase "peelers" Nothing "" [] []
+        [ aRule (rootName "peel")
+                [Ops.PCore (CPPi Ops.PWild (CPHole Ops.PWild)
+                                 (CPHole (Ops.PVar "e")))] []
+            [Do (Ops.Say (Lit (VText "first")))]
+        , aRule (rootName "peel")
+                [Ops.PCore (CPPi Ops.PWild (CPHole Ops.PWild)
+                                 (CPHole (Ops.PVar "e")))] []
+            [Do (Ops.Say (Lit (VText "second")))]
+        ]
+
+    peeling k vs =
+      clauses [peelers] emptyGlobals k (holeAt type1) (rootName "peel") vs
+
+    -- Each candidate taken from the counter as it stands then — the engine's
+    -- own sequence, where a body minting is what moves the counter on and
+    -- @peel@'s body mints nothing, so only the matches do.
+    openedAt k it = case next emptyGlobals k (holeAt type1) it of
+      Nothing         -> []
+      Just (mt, rest) ->
+        [ v | Just v <- [lookup "e" (matchEnv mt)] ]
+          ++ openedAt (matchNames mt) rest
+
+    -- @∀ (A : Type₁) -> A@, whose body mentions the binder, so what the match
+    -- opened it at is what the @${e}@ holds.
+    aPi = Pi (Ident "A") type1 (close hidden (Free hidden))
+      where hidden = fst (fresh 99)
 
 -- | What a rule hands back (MS5 phase 63).
 --
@@ -547,7 +734,7 @@ producesTests =
       , ("down",        e, piHole,  [Do Ops.CrossType], Ops.Down Ops.Dom)
       , ("back",        e, hole,    [Do Ops.CrossType], Ops.Back)
       , ("attack",      e, hole,    [],            Ops.Attack)
-      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.IntroPi Nothing)
+      , ("intro",       e, readyAt (arrow type0 type0), [], Ops.IntroPi Nothing)
       , ("try",         e, hole,    [],            Ops.Try (term type0))
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
@@ -557,7 +744,7 @@ producesTests =
         -- development, while a @call@ produces whatever the clause that ran
         -- handed back with @return@. So the call here is to 'returningRule',
         -- which does exactly that and nothing else.
-      , ("prim-prove",  e, hole,    [],            Ops.Prove)
+      , ("prim-step",  e, hole,    [],            Ops.Dispatch)
       , ("call",        e, hole,    [],            Ops.Call "gives" [])
         -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
         -- clause of @elaborate@ now, and it refuses those — so the term has to
@@ -569,6 +756,11 @@ producesTests =
         -- row that stood here before it; the three accessors only read the
         -- surface term they are handed.
       , ("expand-implicits", nat, holeAt natType, [], Ops.ExpandImplicits succZero)
+        -- **Its other half** (MS12 phase 321). The row is a @let@ whose
+        -- annotation wrote no brace, which is the case that records nothing and
+        -- needs no local in scope — what is crossed here is that it produces
+        -- nothing, which is the whole of what this table is about.
+      , ("record-implicits", e, hole, [], Ops.RecordImplicits explicitLet)
       , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
       , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
       , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
@@ -589,6 +781,13 @@ producesTests =
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (nameFromText "Nat.succ") [])) (text "a"))
       ]
+
+    -- @let x : Type\8320 = Type\8320 in x@, as a focused surface term: an
+    -- annotated @let@ with no brace in it (MS12 phase 321).
+    explicitLet =
+      Lit (VSurface (rootedAt
+        (SurfaceLet "x" (Just (SurfaceUniverse 0)) (SurfaceUniverse 0)
+                    (SurfaceName [] "x"))))
 
     -- @succ zero@, as a focused surface term.
     succZero =
@@ -728,7 +927,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] [] [] rootScope 1000 [] 0 NoUndischargeableTrust)
+                   (expectedBase ++ [returning]) [] [] [] [] rootScope 1000 [] 0 NoUndischargeableTrust)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --
@@ -742,23 +941,23 @@ returning =
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.
-    , Rule (rootName "runs-on") [] []
+    , aRule (rootName "runs-on") [] []
         [Do (Ops.Return (Lit (VText "first"))), Do Ops.Attack]
       -- A body with no @return@ at all.
-    , Rule (rootName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
+    , aRule (rootName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
       -- Two clauses, one arity. The first fails before it can return — it
       -- cannot fail /after/, because @return@ ends the body — so the value the
       -- caller ends up with is the second clause's.
-    , Rule (rootName "two-ways") [] []
+    , aRule (rootName "two-ways") [] []
         [Do Ops.Into, Do (Ops.Return (Lit (VText "first")))]
-    , Rule (rootName "two-ways") [] []
+    , aRule (rootName "two-ways") [] []
         [Do (Ops.Return (Lit (VText "second")))]
     ]
 
 -- | @rule gives :- do return \"a value\"@.
 returningRule :: Rule
 returningRule =
-  Rule (rootName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
+  aRule (rootName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
@@ -770,7 +969,7 @@ runOut :: Machine -> Either FailReason Machine
 runOut m = case step m of
   Continue m'       -> runOut m'
   Saying _ m'       -> runOut m'
-  Declaring _ m'    -> runOut m'
+  Declaring _ _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'
@@ -805,8 +1004,19 @@ ranOk m = case runOut m of
 -- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
-  [ "attack", "try-core", "abandon", "eliminate-core"
-  , "eliminate-generalising-core", "prove", "fill"
+    -- **@try-in-scope@ is written @at ? _ : _@ and nothing else** (MS12), so it is
+    -- offered at every hole and at no guess. **It is first, ABOVE @attack@**
+    -- (his instruction of 2026-11-23): @attack@ never fails, so below it this
+    -- rule was never reached by a bare @prove@. @fit-in-scope@ is the same walk
+    -- for a hypothesis that has to be applied, and sits just under it.
+  [ "try-in-scope", "fit-in-scope"
+  , "attack", "try-core", "abandon"
+    -- **@rename@ is offered at every component** (MS12 phase 330): its focus
+    -- is @at _@, because a word belongs to a binder and all five
+    -- components are one. It is therefore in this list and in every guess
+    -- listing below, and only the core fragment loses it.
+  , "rename", "eliminate-core"
+  , "eliminate-generalising-core", "step", "step", "step", "fill"
   , "unify-refine-core", "apply-core"
   , "fit-core", "fit-core"
     -- The asking half of the three component tactics (MS5 phase 62b). They
@@ -823,19 +1033,48 @@ everyHoleRule =
     -- specialiser arrived, and now calls @split-elaborate@ like the other.
     ++ splitHelpers
     -- **The two interactive tactics** (MS9 phase 231), which ask only
-    -- @focus-is-hole@ and so are offered at every one.
+    -- @at ? _ : _@ and so are offered at every one.
     ++ ["induction-core", "case-core"]
     ++ replicate 15 "elaborate"
     ++ ["run-block"]
+    -- **@intro-binders@ is written @at ? _ : _@ as of MS12 phase 357**, with
+    -- @intro@ itself: what it walks is the hole the cursor stands on. A test
+    -- about an argument nobody supplied does not exclude a clause (phase 47),
+    -- so all four are offered — a group or a single binder, written or bare.
+    ++ replicate 4 "intro-binders"
     ++ replicate 2 "spine-arguments"
+
+-- | 'everyHoleRule' with the two nullary @intro@ clauses, which a Π or a @let@
+-- goal adds (MS12 phase 357). The @intro "a"@ pair takes an argument, so a
+-- listing with none does not show it.
+--
+-- **@intro@ is declared just above @attack@** (MS12 phase 357), and definition
+-- order is dispatch order, so that is where the rows appear.
+holeRulesWithIntro :: [String]
+holeRulesWithIntro = before ++ ["intro", "intro"] ++ after
+  where
+    (before, after) = span (/= "attack") everyHoleRule
+
+-- | 'holeRulesWithIntro' with @by-induction@, which a Π goal adds and a @let@
+-- goal does not (MS12 phase 360).
+--
+-- **The difference between this list and 'holeRulesWithIntro' IS the landing.**
+-- @by-induction@'s head is @at ? _ : core`∀ (${x} : ${T}) -> ${E}`@ — the first
+-- clause in the base that asks what shape its goal /is/ rather than asking a
+-- yes-or-no question about it — so it is offered at a universal and absent at a
+-- @let@, and the two listings say exactly that. It is declared between @intro@
+-- and @attack@, and definition order is dispatch order.
+holeRulesAtPi :: [String]
+holeRulesAtPi = before ++ ["by-induction"] ++ after
+  where
+    (before, after) = span (/= "attack") holeRulesWithIntro
 
 -- | The recursive helpers every listing at a guess shows.
 --
 -- **A test about an argument nobody supplied does not exclude a clause** (phase
 -- 47), so a rule whose head only asks about its argument is offered wherever
--- its state test passes — and @intro-binders@ really does apply at a guess, in
--- all four of its clauses: a group or a single binder, each with a written type
--- or without.
+-- its state test passes. @intro-binders@ left this list in MS12 phase 357: it
+-- is written @at ? _ : _@ now, with @intro@.
 walkers :: [String]
 walkers =
   ["claim", "assume", "quantify"]
@@ -843,7 +1082,6 @@ walkers =
     -- @elaborate@ clause that calls them rather than with the other helpers.
     ++ splitHelpers
     ++ [ "run-block"
-       , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
        , "spine-arguments", "spine-arguments"
        ]
 
@@ -857,7 +1095,11 @@ splitHelpers :: [String]
 splitHelpers =
   [ "no-nesting"
   , "ihs-for", "ihs-for"
-  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+  , "reverse-onto", "reverse-onto"
+    -- **@any-of@ is headless like the list helpers either side of it** (MS12),
+    -- so it is offered wherever they are — the core fragment included.
+  , "any-of", "any-of"
+  , "apply-all", "apply-all"
   , "instantiate-with"
   , "name-or-stem", "name-or-stem"
   ]
@@ -883,7 +1125,7 @@ splitHelpers =
   ]
   -- **The interactive spelling's own helpers** (MS9 phase 231), after
   -- @split-elaborate@ because that is where the base declares them. The two
-  -- tactics themselves ask @focus-is-hole@, so they are in 'everyHoleRule' and
+  -- tactics themselves are written @at ? _ : _@, so they are in 'everyHoleRule' and
   -- not here.
   ++ replicate 4 "argument-patterns"
   ++ ["argument-pattern", "open-case", "open-case"]
@@ -894,3 +1136,86 @@ splitHelpers =
 -- | @Nat@, as a core term, for the row above.
 natType :: Core
 natType = Global (rootName "Nat") []
+
+-- --------------------------------------------------------------------------
+-- The focus as a pattern (MS12 phase 358, `~9j34x`)
+-- --------------------------------------------------------------------------
+
+-- | __@at@ filters and binds__ — his framing of 2026-09-14, /@at@ names the
+-- subject and the tag names the language/.
+--
+-- **It replaces the four focus tests**, so what is checked here is what those
+-- tests were checked for: the right component and no other, and then the thing
+-- a test could not do — the parts of the focus, bound.
+focusTests :: TestTree
+focusTests =
+  testGroup
+    "the focus, via at"
+    [ -- **One form per component, and each matches its own and nothing else.**
+      testCase "a claim pattern matches a claim and not a guess" $
+        ( offered (claimPat "h" "s") (holeAt type0)
+        , offered (claimPat "h" "s") (guessAt type0)
+        ) @?= (True, False)
+
+    , testCase "a guess pattern matches a guess and not a claim" $
+        ( offered (guessPat "h" "s") (guessAt type0)
+        , offered (guessPat "h" "s") (holeAt type0)
+        ) @?= (True, False)
+
+    , testCase "an assumption pattern matches neither" $
+        ( offered (assumePat "h" "s") (holeAt type0)
+        , offered (assumePat "h" "s") (guessAt type0)
+        ) @?= (False, False)
+
+      -- **THE BINDER POSITION BINDS THE COMPONENT'S OWN IDENTITY** — the word
+      -- it prints and the variable it is, as the 'Identifier' of @~gr236@. That
+      -- is what lets a word read off the focus be handed to an op that takes
+      -- one, and it is the thing no focus test could ever answer.
+    , testCase "the binder binds the component's word and variable" $
+        lookup "h" (bound (claimPat "h" "s") (holeAt type0))
+          @?= Just (VIdent (Ops.Identifier (Ident "goal") (Just var)))
+
+    , testCase "and the type position binds the type as written" $
+        lookup "s" (bound (claimPat "h" "s") (holeAt type0))
+          @?= Just (VTerm type0)
+
+      -- **A core pattern at the type position discriminates**, which is the
+      -- whole landing in one line: the head asks what shape the goal is and
+      -- names its parts.
+    , testCase "a core pattern at the type position matches a Π only" $
+        ( offered piPat (holeAt (arrow type0 type0))
+        , offered piPat (holeAt type0)
+        ) @?= (True, False)
+
+    , testCase "and it binds the parts of that Π" $
+        [ v | (n, v) <- bound piPat (holeAt (arrow type0 type0)), n == "T" ]
+          @?= [VTerm type0]
+    ]
+  where
+    -- A base holding exactly the clause under test, so what is offered is
+    -- either that clause or nothing.
+    only cp =
+      ruleBase "focus" Nothing "" [] []
+        [ (aRule (rootName "r") [] [] [Do Ops.Attack]) { ruleFocus = Just cp } ]
+
+    asked cp cur = matches [only cp] emptyGlobals 0 cur
+
+    offered cp cur = not (null (iterRules (asked cp cur)))
+
+    -- **Through 'next', because 'RuleIter' exports no field** — the bindings a
+    -- fork made are nobody's to read until an alternative is taken (@~thwhg@),
+    -- which is exactly what this does.
+    bound cp cur = case next emptyGlobals 0 cur (asked cp cur) of
+      Just (mt, _) -> matchEnv mt
+      Nothing      -> []
+
+    claimPat x t  = Ops.CompClaim    (Ops.PVar x) (Ops.PVar t)
+    guessPat x t  = Ops.CompGuess    (Ops.PVar x) (Ops.PVar t)
+    assumePat x t = Ops.CompAssume   (Ops.PVar x) (Ops.PVar t)
+
+    -- @at ? h : core`∀ (${_} : ${T}) -> ${E}`@.
+    piPat =
+      Ops.CompClaim (Ops.PVar "h")
+        (Ops.PCore (CPPi Ops.PWild
+                         (CPHole (Ops.PVar "T"))
+                         (CPHole (Ops.PVar "E"))))

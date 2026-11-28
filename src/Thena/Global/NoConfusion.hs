@@ -113,6 +113,7 @@ import Thena.Core.Term
   , close
   , fresh
   , freeVars
+  , wordsMadeFree
   )
 import Thena.Core.Typing (check)
 import Thena.Global.Env
@@ -194,14 +195,14 @@ generateNoConfusion env n0 d
   | isDeclared famName env             = Clash famName
   | isDeclared lemName env             = Clash lemName
   | otherwise =
-      let (famTy,   n1) = familyType n0
-          (famBody, n2) = family n1
+      let (famTy,   n1) = written familyType n0
+          (famBody, n2) = written family n1
        in case verdict (check env [] n2 famBody famTy) of
             Left e   -> Rejected famName e
             Right () ->
               let env1          = addDefinition famName (MkDefinition (inductiveLevels d) [] famTy famBody) env
-                  (lemTy,   n3) = lemmaType n2
-                  (lemBody, n4) = lemma n3
+                  (lemTy,   n3) = written lemmaType n2
+                  (lemBody, n4) = written lemma n3
                in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
@@ -224,20 +225,29 @@ generateNoConfusion env n0 d
       | isDeclared invName env2 = Clash invName
       | isDeclared lawName env2 = Clash lawName
       | otherwise =
-          let (invTy, n1) = inverseType n
-              (invTm, n2) = inverseBody n1
+          let (invTy, n1) = written inverseType n
+              (invTm, n2) = written inverseBody n1
            in case verdict (check env2 [] n2 invTm invTy) of
                 Left e   -> Rejected invName e
                 Right () ->
                   let env3        = addDefinition invName (MkDefinition (inductiveLevels d) [] invTy invTm) env2
-                      (lawTy, n3) = lawType n2
-                      (lawTm, n4) = lawBody n3
+                      (lawTy, n3) = written lawType n2
+                      (lawTm, n4) = written lawBody n3
                    in case verdict (check env3 [] n4 lawTm lawTy) of
                         Left e   -> Rejected lawName e
                         Right () ->
                           Generated
                             (addDefinition lawName (MkDefinition (inductiveLevels d) [] lawTy lawTm) env3)
                             n4
+
+    -- __Every word these four lemmata bind is free where it stands__ — his
+    -- ruling of 2026-11-20, /THERE IS ONE NAME/, part one, and
+    -- 'Thena.Core.Term.wordsMadeFree' is the whole of it (MS12 phase 329). The
+    -- words are minted blind as the terms are built, because a chain's motive
+    -- is built before the binders that enclose it exist; freeing them is
+    -- therefore one question asked of each finished term, and asked before the
+    -- kernel sees it so that what was checked is what is stored.
+    written builder n = let (t, n1) = builder n in (wordsMadeFree [] t, n1)
 
     -- Everything checked here is /generated/, so it holds no level meta and
     -- can owe no obligation. The counter is not wanted either — these checks

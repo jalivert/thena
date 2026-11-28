@@ -36,10 +36,12 @@ import System.Directory (listDirectory)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Engine (scope)
 import Thena.Files (startingSession)
+import Thena.Core.Term (rootScope)
 import Thena.Language.Builtin (coreHead, coreRules, surfaceHead, surfaceRules)
 import Thena.Language.Instral (instralRules)
-import Thena.View (sessionGrammars, sessionRules)
+import Thena.View (machineOf, sessionGrammars, sessionRules)
 import qualified Thena.Language.Earley as E
 import Thena.Surface.Read (parseSurfaceText)
 import Thena.Syntax.Lexer (lexTokens)
@@ -217,7 +219,7 @@ sample n = case n of
 assembled :: IO [E.Rule]
 assembled = do
   (s, _) <- startingSession
-  pure (instralRules (sessionGrammars s) (sessionRules s))
+  pure (instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s))
 
 
 -- | Deep enough that a binder list inside a λ inside an arrow is reached, and
@@ -375,7 +377,7 @@ unread what head' rs corpus = case [ s | s <- corpus, not (reads' s) ] of
 headsAreSayable :: IO ()
 headsAreSayable =
   [ h
-  | h <- nub (map E.ruleHead (surfaceRules [] ++ coreRules []))
+  | h <- nub (map E.ruleHead (surfaceRules [] rootScope ++ coreRules [] rootScope))
   , any (`elem` ":/|.,;") h || null (words h) || length (words h) < 2
   ] @?= []
 

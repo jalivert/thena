@@ -3,9 +3,6 @@ proving const : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> :where
 focus
   let ? const1 : A in
@@ -17,117 +14,65 @@ context
 type
   A
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-fill ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-fit-core ‹f›
-fit-core ‹f›
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-induction-core ‹t›
-case-core ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-run-block ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> elaborate surface`a`
 already equal
 thena spine> :show
@@ -154,9 +99,6 @@ proving again : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> elaborate surface`b`
 stuck: not in scope: b
 thena spine> elaborate surface`a a`
@@ -168,16 +110,14 @@ proving shown : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> :step on
 thena spine> elaborate surface`a`
 pc
-  0  w = surface-name t
-  1  x = resolve-name w
-  2  call fill x
-  3  call solve
+  0  h = here
+  1  e = expand-implicits t
+  2  w = surface-name t
+  3  f = resolve-name w
+  4  call spine-arguments h f e
 env
   t = ‹a›
 stack
@@ -187,74 +127,71 @@ stack
   call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  x = resolve-name w
-  1  call fill x
+  0  e = expand-implicits t
+  1  w = surface-name t
+  2  f = resolve-name w
+  3  call spine-arguments h f e
+env
+  h = core`‹Var 25›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  w = surface-name t
+  1  f = resolve-name w
+  2  call spine-arguments h f e
+env
+  e = ‹a›
+  h = core`‹Var 25›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  f = resolve-name w
+  1  call spine-arguments h f e
+env
+  w = a
+  e = ‹a›
+  h = core`‹Var 25›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  call spine-arguments h f e
+env
+  f = core`a`
+  w = a
+  e = ‹a›
+  h = core`‹Var 25›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  goto h
+  1  call fill f
   2  call solve
 env
-  w = a
+  h = core`‹Var 25›`
+  f = core`a`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  call fill x
-  1  call solve
-env
-  x = core`a`
-  w = a
-  t = ‹a›
-stack
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  n = fresh-name "refined"
-  1  x = define n t
-  2  s = typeof x
-  3  g = goal
-  4  unify-into s g
-  5  prim-try x
-env
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  x = define n t
-  1  s = typeof x
-  2  g = goal
-  3  unify-into s g
-  4  prim-try x
-env
-  n = refined
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  s = typeof x
-  1  g = goal
-  2  unify-into s g
-  3  prim-try x
-env
-  x = core`a`
-  n = refined
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
   call, 0 instruction(s) to resume (returned)
   call, 0 instruction(s) to resume (returned)

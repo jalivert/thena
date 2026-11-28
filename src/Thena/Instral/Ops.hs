@@ -11,6 +11,7 @@
 module Thena.Instral.Ops
   ( Name
   , Env
+  , Identifier (..)
   , Value (..)
   , Operand (..)
   , operandIn
@@ -30,38 +31,56 @@ module Thena.Instral.Ops
 
     -- * Rules (§8)
   , Rule (..)
+  , Origin (..)
     -- | Re-exported from "Thena.Instral.Pattern" (MS5 phase 84), so that every
     -- existing @import Thena.Instral.Ops (Pattern (..))@ still reads. The type moved a
     -- layer down because "Thena.Errors" must name it; nothing else changed.
   , Pattern (..)
   , Skeleton (..)
   , Slot (..)
+  , CoreP (..)
+  , LevelP (..)
+  , ComponentP (..)
+  , CoreSlot (..)
+  , corePSlots
   , patternBinds
+  , componentPBinds
   , patternIrrefutable
   , matchPattern
+  , matchCore
   , matchPatterns
   , matchClause
+  , matchFocus
+  , matchHead
   , Test (..)
   ) where
 
-import Control.Monad (zipWithM)
+import Data.Bifunctor (first)
 import Data.Maybe (isJust)
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, levelOfNat)
 import Thena.Core.Term
-  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..), Opened,
+  (Core (App, Global, Primitive, Trusted, Universe),
+   GlobalName (..), Ident (..), Literal (..), Opened, Var,
    nameDotted)
+-- | Qualified for one constructor: the kernel's 'Thena.Core.Term.Eliminate' and
+-- this module's own 'Eliminate' op are different things of one name.
+import qualified Thena.Core.Term as Term
 import Thena.Instral.Pattern
-  (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
+  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..), CoreSlot (..), LevelP (..)
+  , ComponentP (..), componentPSlots, componentPBinds
+  , skeletonHoles, corePSlots, patternBinds, patternIrrefutable )
 import Thena.Instral.Type (Signature (..), Ty (..))
-import Thena.Development.Cursor (Part (..))
+import Thena.Development.Cursor (Part (..), Cursor, Focus (..), focus)
+import qualified Thena.Development.Component as Component
 import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity, SurfacePattern)
-import Thena.Tactics.Eliminate (MethodShape)
+import Thena.Tactics.Eliminate (MethodShape, spineOf)
 import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
+import Thena.Syntax.Lexer (Pos)
 import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
@@ -93,6 +112,24 @@ type Env = [(Name, Value)]
 -- searched at run time (§8), so nothing constructs a rule value and nothing
 -- consumes one. 'Rule' stays in this module for the other half of that argument
 -- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
+-- | A binder's identity as a rule holds it (MS12 phase 353): the word it
+-- displays, and the token it stands for when there is one.
+--
+-- **A type of its own rather than a pair**, for the reason
+-- 'Thena.Instral.Type.TMethodShape' is one: the two fields are not alike —
+-- the word is display and decides nothing, the token is the identity — and a
+-- pair would have every reader spell that out again. It is also what
+-- 'Thena.Instral.Type.TIdent' names, so the value and the type have one shape
+-- between them.
+data Identifier = Identifier
+  { identWord  :: Ident
+    -- ^ what it prints as. Decides nothing — see 'Thena.Core.Term.Ident'.
+  , identToken :: Maybe Var
+    -- ^ **the binder it is, when a binder has been opened at one.** 'Nothing'
+    -- is a word and nothing more, and @intro@ reads that as /mint a token/.
+  }
+  deriving (Eq, Show)
+
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VName    GlobalName
@@ -119,6 +156,24 @@ data Value
     -- ruling of 2026-09-12 — and it reads as a name at the root. Inference
     -- refuses a /variable/ of 'Thena.Instral.Type.TString' there, so nothing
     -- but a literal reaches that reading.
+  | VIdent   Identifier
+    -- ^ **a binder's identity: the word it displays, and the token it stands
+    -- for when there is one** (MS12 phase 353) —
+    -- 'Thena.Instral.Type.TIdent' carries why it is a type of its own and his
+    -- ruling of 2026-11-25 that put it there.
+    --
+    -- **'Nothing' is a word and nothing more**, which is what a written
+    -- @\"A\"@ literal and @name-ident n@ both give, and what @intro@ reads as
+    -- /mint a token for this word/. **'Just' is a token already minted**, and
+    -- @intro@ adopts it: the rule is holding a term that points at that token
+    -- — the inside of a binder a pattern opened — and minting a second would
+    -- leave the context entry and the term disagreeing while both printed the
+    -- same word.
+    --
+    -- **This is the first 'Value' to carry a 'Var'**, and the only one. A
+    -- variable has reached a rule body as @Free x@ inside a 'VTerm' since MS4;
+    -- what is new is naming one on its own, so that something other than a
+    -- term can say /this binder/.
   | VTerm    Core      -- ^ a core term; a variable is @Free x@
   | VSurface SurfaceZipper
     -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
@@ -403,6 +458,55 @@ data Op
     -- **One direction only.** There is no @text-name@: a 'String' becoming a
     -- 'Name' is the direction that needs checking, not forgetting, and nothing
     -- has asked for it.
+  | NameIdent Operand
+    -- ^ **a 'Name' read as an identifier with no token** (MS12 phase 353) —
+    -- @name-ident n@.
+    --
+    -- **'NameText'\'s argument, one type along, and his ruling of 2026-09-12 is
+    -- the one being applied.** 'Thena.Instral.Type.TIdent' is a word plus an
+    -- optional token, so a 'Name' is exactly an identifier that has no token —
+    -- the conversion forgets nothing and adds nothing. It is written down for
+    -- the reason an explicit coercion op was chosen over subtyping there: a
+    -- 'TName' accepted silently at a 'TIdent' position would be the first
+    -- subtyping in a language that is otherwise plain Hindley-Milner, and the
+    -- place it would be wrong is exactly the place that matters — a rule that
+    -- /has/ a token and drops it mints a second one.
+    --
+    -- **A written @\"…\"@ literal needs no op**, because his ruling of
+    -- 2026-11-25 widened the literal set instead; this is for a /variable/,
+    -- which is what @fresh-name@, @lambda-name@, @binder-name@ and
+    -- @pattern-head@ all answer with.
+    --
+    -- **One direction only, for 'NameText'\'s reason.** Going the other way
+    -- throws a token away, and a rule that means to do that can say so by
+    -- writing the word.
+
+  | IdentTerm Operand
+    -- ^ **the variable an identifier /is/, as a term** (MS12) — @ident-term x@.
+    --
+    -- **It reads the token and nothing else**, so it is the one way a rule gets
+    -- from a binder it has in hand to the term that mentions it. A core
+    -- pattern's binder position binds a 'Thena.Instral.Type.TIdent' (phase 355,
+    -- his ruling of 2026-11-26), which is what lets @call intro x@ need no
+    -- annotation; every op that /takes a term/ then had nothing to be handed.
+    -- A rule could match @core\`∀ (${x} : ${T}) -> ${E}\`@, introduce the
+    -- binder with @intro x@ and still not name the parameter it had just
+    -- bound — which is the half of @~9j34x@ the pattern alone did not close.
+    --
+    -- **Not the other direction of @name-ident@, which stays one-way.** That
+    -- would be @Ident -> Name@ and would throw the token away; this one spends
+    -- it, and is the only reader of 'Identifier'\'s token outside the three
+    -- builders and the two introducers.
+    --
+    -- **Exact, where resolving the word is not.** @resolve-name@ finds an entry
+    -- through 'localNamed', which can only see a word a user could have
+    -- written, so a generalised copy a split made is unreachable by it —
+    -- 'InScopeAt' records the same reason for handing variables over. The token
+    -- /is/ the identity (§'Identifier'), so there is nothing to look up.
+    --
+    -- **A word carrying no token fails.** It names no variable, so there is no
+    -- term to answer with — and minting one, which is what @intro@ does with
+    -- the same absence, would answer with a variable nothing had bound.
 
   | Along                     -- ^ past the head of the focus (§4.3)
   | Into                      -- ^ into a guess's body
@@ -465,6 +569,33 @@ data Op
     -- where it is going. So the empty address is @goto-root@ rather than an
     -- empty program, and clicking the root moves the cursor instead of
     -- silently doing nothing.
+  | NextGoal
+    -- ^ **to the goal to work on next** (MS12, @~g3qnw@) — the fourth @goto@,
+    -- and the one that needs no operand because the development already says
+    -- where to go.
+    --
+    -- __The machine keeps no list of open goals.__ His ruling of 2026-11-23,
+    -- written up in @.jalivert\/discussion\/focusing-the-next-goal.md@: the
+    -- development already says what is unfinished and in what order, so a
+    -- queue beside it would be a second copy of the truth to keep in step.
+    -- Coq and Lean keep one because their hole stores are unordered maps;
+    -- Isabelle keeps none, because its subgoals /are/ its proof state's
+    -- premises. An ordered chain is Isabelle's case.
+    --
+    -- __It is the wall this clears.__ A bare @step@ could close a goal and
+    -- then had nothing to do, because the new hole was elsewhere and the names
+    -- that reach it are minted by the machine — so no rule base could contain
+    -- them and every proof needed a @goto@ typed by hand between the tactics.
+    -- A nullary move needs no name, so a rule can walk the goals.
+    --
+    -- 'Thena.Development.Cursor.nextGoal' is the definition and says what
+    -- /next/ means: the first unfinished goal in the innermost piece of work
+    -- that still has one. It refuses with 'Thena.Errors.NoGoalLeft' when the
+    -- development is finished, which is what makes a strategy able to stop.
+    --
+    -- __A rule still cannot defer a goal.__ There is no @unfocus@, so nothing
+    -- reorders the search; setting a goal aside by hand is @goto@. The sidecar
+    -- queue that would allow it is unrefuted and not foreclosed — @~4xqh5@.
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
@@ -498,6 +629,18 @@ data Op
   | IntroLet (Maybe Operand)
     -- ^ table 2.8's @intro-let@, Brady's @LET@ — the type is read **as
     -- written**, so the author's binding is kept rather than substituted away.
+  | Rename Operand
+    -- ^ **the word the component at the focus is bound under** — @rename@ (MS12
+    -- phase 330), his ruling of 2026-11-20, /THERE IS ONE NAME/, part four.
+    --
+    -- **It is the repair that replaced the printer's rename.** A word written
+    -- twice kills the outer binder, which then prints marked; walking up to it
+    -- and renaming gives it a free word in the term, so every position that
+    -- mentions it prints that word and print-parse is restored.
+    --
+    -- **A hole-life op in shape** — it acts on the component at the focus and
+    -- answers with nothing — and it is the one of them that takes a name,
+    -- because the word is the whole of what it does.
     -- What @intro@'s @goal-type-is-let@ clause runs.
     --
     -- **There is deliberately no op that is both.** @prim-intro@ was, deciding
@@ -512,30 +655,30 @@ data Op
     -- @\ y -> y@ against a goal @∀ (x : A) -> A@ must bind **y**, or the body's
     -- @y@ resolves to nothing.
     --
-    -- **An optional argument, not an optional mode.** @Prove (Maybe Operand)@
+    -- **An optional argument, not an optional mode.** @Dispatch (Maybe Operand)@
     -- was deleted one phase ago for being the latter — two mechanisms behind
     -- one constructor. This is one operation with a default.
   | Try     Operand           -- ^ attach a guess to the hole at the focus
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
   | Abandon                   -- ^ drop a hole nothing refers to
-  | Prove
+  | Dispatch
     -- ^ **dispatch the rule engine at the focus** (§7.3, §8) — every rule whose
     -- head passes, in definition order, with a choice point if there is more
     -- than one.
     --
-    -- **It carries nothing** (MS4 phase 41). It was @Prove (Maybe Operand)@,
+    -- **It carries nothing** (MS4 phase 41). It was @Dispatch (Maybe Operand)@,
     -- the operand being the surface term to elaborate, and the base was
     -- /partitioned/ on whether a rule's head asked about one. Both are gone,
     -- and the reason is that **elaboration was never a dispatch**: it is a rule
     -- of many clauses called by name, which is @Call@. The user, 2026-09-01:
     -- /"There is no `elaborate` command — there will be an elaborate rule!"/
     --
-    -- So this op's only customers are search — a bare @prove@ at the REPL,
-    -- which is now the rule @prove@ over this, and the body of a strategy rule
+    -- So this op's only customers are search — a bare @step@ at the REPL,
+    -- which is now the rule @step@ over this, and the body of a strategy rule
     -- like @auto@ when one is written.
     --
-    -- Its written word is **@prim-prove@**: the good word belongs to the rule
+    -- Its written word is **@prim-step@**: the good word belongs to the rule
     -- (phase 23b's convention).
   | Yield Operand
     -- ^ hand control to the REPL and stay where you are (MS4 phase 45b).
@@ -636,10 +779,10 @@ data Op
     --
     -- **'Thena.Instral.Ops.Rule'\'s @ruleName@ is the same confusion one level over**
     -- and is deliberately left alone here — @ms5\/CLOSEOUT.md@ 38.
-    -- ^ **call a rule by name — the same search as 'Prove', with a narrower
+    -- ^ **call a rule by name — the same search as 'Dispatch', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
     --
-    -- > @Prove@ means \"search any rule that fits and wants to try solving the
+    -- > @Dispatch@ means \"search any rule that fits and wants to try solving the
     -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
     -- > Calling is not that different from searching. Calling is essentially
     -- > what Prolog does.
@@ -662,7 +805,7 @@ data Op
     --     92 inference refuses it when the bases load.
     --
     -- **A call carries no hint**, so a rule whose head asks about one is never
-    -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
+    -- a call candidate; it is reached by @step ‹hint›@. Hints are on MS2's
     -- closeout list.
   | FreshName Operand
     -- ^ a name nothing has taken, from a hint (phase 24c, the user's
@@ -696,6 +839,33 @@ data Op
     --
     -- It yields the variable as a term, @Free x@, which is the shape @goto@
     -- already reads.
+  | InScopeAt
+    -- ^ **what is in scope at the focus, as terms** (MS12) — the second
+    -- companion to 'Here', which gives the one variable the focus /is/ standing
+    -- on, and to 'Goal', which gives the type it is claimed at.
+    --
+    -- **Nothing could list the context before this.** A rule could use a
+    -- hypothesis only if its caller had named one: @try-core@ wants an explicit
+    -- term, and a @use@-shaped rule still needs @resolve-core core\`v\`@ run
+    -- for it first. So no search could discover its own candidates and every
+    -- automated proof bottomed out at a name the author wrote down.
+    --
+    -- **It yields each entry as @Free x@**, which is 'Here'\'s shape and the one
+    -- @goto@, @prim-try@ and @typeof@ already read — so there is nothing to
+    -- resolve. That is not only shorter: a name is resolved through
+    -- 'Thena.Engine.localNamed', which can only find an entry whose /word/ a
+    -- user could have written, and a generalised copy a split made has no such
+    -- word. Handing the variable over skips the question.
+    --
+    -- **Innermost first**, which is 'Thena.Core.Term.InScope'\'s @scopeWithin@
+    -- order and the preference 'Thena.Engine.localNamed' already makes when two
+    -- entries carry one word. A strategy that wants the other order has
+    -- @reverse-onto@ in the standard base.
+    --
+    -- **Every entry, not the hypotheses alone.** A local definition is as
+    -- usable a term as a hypothesis, and which of them a strategy is interested
+    -- in is the strategy's business: the op reports what is there, and
+    -- @typeof@ is how a rule asks about one.
   | FreshLevel
     -- ^ a **freshly minted level meta** (MS5 phase 89) — the level a bare
     -- @Type@ means, on its own.
@@ -717,6 +887,24 @@ data Op
     -- computed.
   | UniverseAt Operand
     -- ^ the universe at a level (MS5 phase 89) — @universe-at l@.
+  | OneLess Operand
+    -- ^ **one less than a whole number** (MS12 phase 347) — @one-less n@, the
+    -- whole of @instral@\'s arithmetic.
+    --
+    -- **It exists so that a counted tactic can be written as a rule.** @step
+    -- ‹n›@ is two clauses — the literal @0@, and a positive count that makes
+    -- one move and calls itself with this — so the counting down is in the base
+    -- where the control flow belongs, and not in a loop in here.
+    --
+    -- **Total, and it does not guard.** @one-less 0@ is @-1@: a rule that must
+    -- not go below nought says so with the @number-is-positive@ head test,
+    -- which is where the @step@ clauses say it. An op that refused at nought
+    -- would be a guard dressed as arithmetic, and the head is where this base
+    -- states every other condition.
+    --
+    -- **Nothing else arithmetic is added with it.** A general @minus@, a
+    -- comparison and a successor are all absent because nothing asks for them;
+    -- @instral@ computes with the machine\'s data and not with numbers (§5.3).
   | ResolveName Operand
     -- ^ what a name denotes, with its level arguments inserted (MS4 phase 48).
     -- The other two of those nine operands.
@@ -879,7 +1067,23 @@ data Op
     -- clause below, exactly as the Haskell @case@ fell through.
     --
     -- A head with nothing recorded — every DC-declared global, and every local
-    -- — takes its arguments as written, so the term comes back unchanged.
+    -- written with no brace — takes its arguments as written, so the term comes
+    -- back unchanged.
+  | RecordImplicits Operand
+    -- ^ **@EXPAND@\'s other half, written for a @let@** (MS12 phase 321,
+    -- `~rskkv`): the braces on the annotation of the @let@ it is given are
+    -- recorded against the local that @define@ has just bound, so a use of that
+    -- name inside the body gets the same insertion a global\'s does.
+    --
+    -- **A @let@ is the only binding form whose annotation a user writes inside
+    -- a term**, which is why one op covers the whole of what is not a global. A
+    -- brace written anywhere else in a term — on a λ\'s binder, or inside a
+    -- higher-order argument\'s type — reaches nothing, and cannot until plicity
+    -- is part of the type.
+    --
+    -- **It takes the @let@ node, not the variable**: the clause that calls it
+    -- has asked @let-is-annotated@ already, and the node carries both the type
+    -- the braces are in and the name they were written for.
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
     -- **It refuses an implicit binder and nothing else.** An annotated binder is
@@ -1026,6 +1230,49 @@ data Op
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
     -- That is @.claude\/spec\/representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
+  | MakeForall Operand Operand Operand
+    -- ^ **an identifier, a domain and a body → the dependent @Π@** (MS12
+    -- phase 356): the reverse of taking a @∀@ apart, and the op a rule needs
+    -- when it destructures a binder and does /not/ @intro@ it.
+    --
+    -- **The body goes back under the binder.** A core pattern matching a
+    -- binder mints a token and opens the scope at it (§8), so the body a rule
+    -- holds is an ordinary term with a free variable where the binder's
+    -- occurrences were; this abstracts that variable out again —
+    -- 'Thena.Core.Term.close', which no op exposed until here. A rule that
+    -- takes a @∀@ apart and then does induction on the parameter never makes
+    -- the variable real, and the motive it builds is exactly this
+    -- re-abstraction.
+    --
+    -- **The identifier carries which variable to close**, and that is why the
+    -- first operand is an 'Identifier' and not a 'Thena.Core.Term.Ident':
+    -- @${x}@ binds the word /and/ the token, and the token is the only thing
+    -- that says which occurrences belong to this binder.
+    --
+    -- **A word with no token binds nothing**, and that is not a failure: the
+    -- binder stands, the body does not mention it, and the result is what
+    -- 'Arrow' builds for a term that names its domain. 'Arrow' is the
+    -- degenerate case of this op and is kept, because elaborating @e a@ has no
+    -- word to supply and @_@ is the right one.
+    --
+    -- **It builds; it does not check** — 'Arrow'\'s line, for 'Arrow'\'s
+    -- reason: @Θ ⊢ S : Type@ is @claim@'s side condition and @try@'s, and a
+    -- constructed term is checked where it is used.
+  | MakeLambda Operand Operand Operand
+    -- ^ **the same for @λ@** (MS12 phase 356) — an identifier, the annotation
+    -- and the body.
+    --
+    -- **Three ops and not one taking a tag**, for the reason 'CaseAnalyse' is
+    -- a second op beside 'Eliminate': @instral@ has no enum to pass, and the
+    -- three binders are three different words a rule writes.
+  | MakeLet Operand Operand Operand Operand
+    -- ^ **the same for @let@** (MS12 phase 356) — an identifier, the value,
+    -- the type and the body, in the order 'Thena.Core.Term.Let' holds them and
+    -- the order a @let@ pattern binds them.
+    --
+    -- **The fourth operand is what makes a @let@ a @let@**: its value is part
+    -- of the node and not of the body, so this is the one binder whose builder
+    -- cannot be three operands wide.
   | ResolveCore Operand
     -- ^ **turn a @core@ region into a term, here** (MS5 phase 61b).
     --
@@ -1090,13 +1337,21 @@ data Op
     --
     -- Refused at the outermost development: there is nothing to pop back to,
     -- and a machine with no development is not a state this language has.
-  | MakeData GlobalName Int [GlobalName] (Maybe [[ArgRole]]) [Operand]
+  | MakeData GlobalName Int [(GlobalName, [Plicity])] (Maybe [[ArgRole]]) [Operand]
     -- ^ **assemble a datatype from elaborated types and hand it out through
     -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
     -- were written, the constructors' names, and the types: the datatype's own
     -- first and then one per constructor, in order. The roles, when there
     -- are any, are a generated datatype's (MS6 phase 103): one list per
     -- constructor, from its grammar.
+    --
+    -- **A constructor's name comes with the plicity of each of its argument
+    -- positions, as they were written** (MS12 phase 320, `~td9j6`), for
+    -- 'DefineGlobal'\'s reason and by the same route: a @Pi@ carries no
+    -- plicity, so the brace a @data@ block writes on a constructor cannot be
+    -- recovered from the elaborated type and has to travel beside it. It used
+    -- to travel nowhere, so a brace on a constructor was accepted and thrown
+    -- away without a word.
     --
     -- The names and the parameter count are fields rather than operands for
     -- 'DefineData'\'s reason — they are written down, never computed — and the
@@ -1258,6 +1513,36 @@ data Op
     -- claim goes directly above the focus, so claiming from one fixed place is
     -- what puts the domains in telescope order and lets a later domain mention
     -- an earlier hole. 'Apply' keeps the focus still for the same reason.
+    --
+    -- **Two ops rather than a flag on one**, which is @eliminate-core@ and
+    -- @eliminate-generalising-core@'s reason: a rule says only what it is
+    -- about, and these two are about two different arguments — one the author
+    -- wrote and one EXPAND inserted. The hole for a written argument is filled
+    -- by that argument a moment later, so where it sits changes nothing; an
+    -- inserted hole is filled by unification from wherever the information
+    -- turns up, so it wants to be as far out as it can get.
+  | NextArgumentName Operand
+    -- ^ **the word the head's next argument position was declared with**, or
+    -- @_@ where it has none (MS12 phase 345) — @next-argument-name f@, the
+    -- read a rule makes just before 'ApplyNext' so that the hole carries the
+    -- author's own word.
+    --
+    -- **His ruling, 2026-11-24**: an argument nobody wrote keeps the name the
+    -- declaration gave its position. @S-refl : ∀ {M : LC} -> …@ used to come
+    -- back from @:infer@ as @∀ {a : LC} -> …@, because the caller minted the
+    -- word with @fresh-name "a"@ and had nothing to mint it from.
+    --
+    -- **It takes the spine and not the type**, so it reads the Π that
+    -- 'ApplyNext' will claim from and cannot come to disagree with it: both
+    -- infer the operand's type and reduce it, and a domain that only appears
+    -- after an unfolding is the case where asking @typeof@ and matching a Π in
+    -- the rule would differ.
+    --
+    -- **The @_@ is answered rather than repaired**, which is
+    -- 'Thena.Core.Term.freeAmong'\'s rule: the base pairs this with
+    -- @name-or-stem@ and @fresh-name@, exactly as the arm walk already pairs
+    -- @binder-name@ with them, so the stem for an anonymous position stays a
+    -- word the base writes down rather than one buried in here.
   | Apply Operand
     -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
     -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
@@ -1611,6 +1896,8 @@ resultOf o = case o of
   Lambda ps _  -> Just (TFun (map TVar [1 .. length ps]) (TVar 0))
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
+  NameIdent _  -> Just TIdent
+  IdentTerm _  -> Just TCore
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
   Quantify _ _ -> Nothing     -- a hole-life op, like 'Attack' and 'IntroPi'
   Claim  _ _   -> Just TCore
@@ -1641,10 +1928,14 @@ resultOf o = case o of
   FreshName _  -> Just TName
   Here         -> Just TCore
   Arrow _ _    -> Just TCore
+  MakeForall {} -> Just TCore
+  MakeLambda {} -> Just TCore
+  MakeLet {}    -> Just TCore
   ApplyTo _ _  -> Just TCore
   FreshLevel     -> Just TLevel
   LevelOf _      -> Just TLevel
   UniverseAt _   -> Just TCore
+  OneLess _ -> Just TInt
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
   SurfaceLiteralOf _ -> Just TCore
@@ -1680,6 +1971,7 @@ resultOf o = case o of
   BinderName _ -> Just TName
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
+  InScopeAt    -> Just (TList TCore)
   Typing _     -> Just TCore
   Define _ _   -> Just TCore   -- the variable it bound, as 'Assume' and 'Claim' do
   Unify _ _    -> Nothing
@@ -1693,6 +1985,7 @@ resultOf o = case o of
   Goto _       -> Nothing   -- a move; it rewrites the cursor and yields nothing
   GotoNamed _  -> Nothing
   GotoRoot     -> Nothing
+  NextGoal     -> Nothing
   Back         -> Nothing
   Play _       -> Nothing
   Attack       -> Nothing
@@ -1706,11 +1999,14 @@ resultOf o = case o of
   -- need an op of its own in an earlier attempt.
   IntroPi _    -> Just TCore
   IntroLet _   -> Just TCore
+  -- **Nothing, like 'Attack'**: it changes a word and binds nothing, so there
+  -- is no variable for a clause to go on with.
+  Rename _     -> Nothing
   Try _        -> Nothing
   Regret       -> Nothing
   Solve        -> Nothing
   Abandon      -> Nothing
-  Prove        -> Nothing
+  Dispatch        -> Nothing
   -- **A call produces, as of MS5 phase 63** — whatever the clause that ran
   -- handed back with @return@. It is a value unconditionally here, because
   -- which clauses a name has is not known when ONE body is read (a rule may
@@ -1777,7 +2073,9 @@ resultOf o = case o of
   ConstructorArguments _ -> Just (TList TName)
   ConstructorRecursiveArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
+  NextArgumentName _ -> Just TName
   ExpandImplicits _ -> Just TSurface
+  RecordImplicits _ -> Nothing
   AppHead _ -> Just TSurface
   AppFirstArgument _ -> Just TSurface
   AppTail _ -> Just TSurface
@@ -1852,6 +2150,7 @@ operandTypes o = case o of
   Value a      -> [(a, TVar 0)]
   Lambda _ _   -> []
   NameText a   -> [(a, TName)]
+  NameIdent a  -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
@@ -1877,11 +2176,18 @@ operandTypes o = case o of
   FreshName a  -> [(a, TName)]
   Here         -> []
   Arrow a b    -> [(a, TCore), (b, TCore)]
+  -- **The identifier comes first and carries the token**, so the three
+  -- binder builders read in the order their binders are written.
+  MakeForall x d b -> [(x, TIdent), (d, TCore), (b, TCore)]
+  MakeLambda x d b -> [(x, TIdent), (d, TCore), (b, TCore)]
+  MakeLet x v t b  -> [(x, TIdent), (v, TCore), (t, TCore), (b, TCore)]
   ApplyTo a b  -> [(a, TCore), (b, TCore)]
   FreshLevel     -> []
   LevelOf a      -> [(a, TInt)]
   UniverseAt a   -> [(a, TLevel)]
+  OneLess a -> [(a, TInt)]
   ResolveName x  -> [(x, TName)]
+  IdentTerm x    -> [(x, TIdent)]
   SurfaceNameOf x -> [(x, TSurface)]
   SurfaceLiteralOf x -> [(x, TSurface)]
   ObjectTerm x -> [(x, TSurface)]
@@ -1917,6 +2223,7 @@ operandTypes o = case o of
   BinderName x -> [(x, TBinder)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
+  InScopeAt    -> []
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
@@ -1935,7 +2242,9 @@ operandTypes o = case o of
   ConstructorRecursiveArguments a -> [(a, TName)]
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
+  NextArgumentName f -> [(f, TCore)]
   ExpandImplicits a -> [(a, TSurface)]
+  RecordImplicits a -> [(a, TSurface)]
   AppHead a    -> [(a, TSurface)]
   AppFirstArgument a -> [(a, TSurface)]
   AppTail a    -> [(a, TSurface)]
@@ -1950,7 +2259,7 @@ operandTypes o = case o of
   None         -> []
   CaseSurvivedOp a -> [(a, TCore)]
   Prepend a b  -> [(a, TVar 0), (b, TList (TVar 0))]
-  Prove        -> []
+  Dispatch        -> []
   DefineData _ -> []
   Along        -> []
   Into         -> []
@@ -1960,11 +2269,17 @@ operandTypes o = case o of
   Goto a       -> [(a, TCore)]
   GotoNamed a  -> [(a, TName)]
   GotoRoot     -> []
+  NextGoal     -> []
   Back         -> []
   Reduce       -> []
   Attack       -> []
-  IntroPi m    -> maybe [] (\x -> [(x, TName)]) m
-  IntroLet m   -> maybe [] (\x -> [(x, TName)]) m
+  -- **The one argument is an identifier and not a name** (MS12 phase 353), his
+  -- ruling of 2026-11-25: a token that came with the word is adopted, and a
+  -- word on its own means mint one. A written literal stands here; a 'TName'
+  -- variable is converted with @name-ident@.
+  IntroPi m    -> maybe [] (\x -> [(x, TIdent)]) m
+  IntroLet m   -> maybe [] (\x -> [(x, TIdent)]) m
+  Rename x     -> [(x, TName)]
   Regret       -> []
   Solve        -> []
   Abandon      -> []
@@ -1995,50 +2310,168 @@ data Rule = Rule
   , ruleParams :: [Pattern]
     -- ^ matched by @Call@; what they bind lands in the body's own 'Env'
     -- (MS5 phase 82 — they were @['Name']@ until patterns arrived).
+  , ruleFocus  :: Maybe ComponentP
+    -- ^ __the focus as a pattern__ — what @at@ was written with (MS12 phase
+    -- 358, @~9j34x@; his framing of 2026-09-14).
+    --
+    -- **'Nothing' is a clause that asks nothing about the focus** and matches
+    -- at any of them, which is what every clause written before this phase
+    -- does.
+    --
+    -- **It is part of the head and it BINDS**, which is why it is not a
+    -- 'Test': a test answers yes or no, and @at ? x : core\`∀ (${y} : ${T}) -> ${E}\`@
+    -- names four things the body then uses. 'Thena.Instral.Ops.matchFocus' is
+    -- the matcher and 'Thena.Rules.clauses' runs it between the parameters and
+    -- the tests, so a test may read what the focus bound.
   , ruleHead   :: [Test]   -- ^ all must pass
   , ruleBody   :: [Instr]
+  , ruleOrigin :: Maybe Origin
+    -- ^ __where this clause was written__ (MS12 phase 342, his direction of
+    -- 2026-11-23: /"perhaps clauses should carry data for where they come
+    -- from"/).
+    --
+    -- **A clause and not a rule**, which is the whole point: a 'Rule' value /is/
+    -- one clause, so two clauses written under one name are two values with two
+    -- origins, and where each sits in its file is the only thing that always
+    -- tells them apart. @:choices@ names a row by its rule, so a fork between
+    -- clauses of one name printed that name twice and said nothing more
+    -- (@~mhz7j@).
+    --
+    -- **'Nothing' is a clause that is in no file** — the synthetic @entry@ and
+    -- @do@ rules a typed line is wrapped in, and anything a caller builds by
+    -- hand. The same meaning 'Thena.View.Failure.stopViewAt' gives it for a
+    -- declaration, and for the same reason.
+  , ruleWrittenAt :: [Pos]
+    -- ^ __where each of the clause's written instructions begins__ (MS12 phase
+    -- 349, @~8w6qw@), in writing order, in the file 'ruleOrigin' names.
+    --
+    -- **A fault inside a body says /instruction 2/ and that is not a line in a
+    -- file.** His ask of 2026-11-24 is that a refusal name a place a terminal
+    -- can open; a clause's own origin reaches the rule and not the mistake
+    -- inside it, so the position of each written statement is kept beside it.
+    -- 'Thena.Rules.faultAt' is what turns an index into a place and is the only
+    -- thing that reads this.
+    --
+    -- **Indexed by WRITTEN position, which is not the position in 'ruleBody'** —
+    -- a nested call is lifted into a binding in front of the instruction that
+    -- wanted it, and an annotation is folded into the binding under it.
+    -- 'Thena.Rules.writtenPositions' is the map from one to the other and
+    -- already existed, for the index.
+    --
+    -- **Empty is a clause whose instructions are in no file**, which is what
+    -- 'ruleOrigin' being 'Nothing' means: the synthetic @entry@ and @do@ rules,
+    -- a block written inside a surface region, and anything a caller builds by
+    -- hand.
   }
   deriving (Eq, Show)
 
--- | Match one pattern against one value, answering the bindings it made.
+-- | __Where a clause was written__ (MS12 phase 342).
+--
+-- **The path is on the clause and not looked up from the base**, which is the
+-- one decision here. A base knows its own file ('Thena.Rules.basePath'), so the
+-- path could have been found by searching the loaded bases for the rule — but a
+-- choice point hands out clauses, not bases, and two bases may hold a rule of
+-- the same name, so the search can answer the wrong file. A clause that carries
+-- its own origin cannot.
+--
+-- **'Thena.Syntax.Lexer.Pos' and not a second position type.** A line and a
+-- column already mean one thing in this project; 'Thena.View.Failure.stopViewAt'
+-- carries the same type for a declaration, and a frontend that can already turn
+-- one into a place to go needs no second shape to learn.
+data Origin = Origin
+  { originPath :: FilePath
+  , originAt   :: Pos
+    -- ^ **Where the clause begins**, for a function as for a rule: the name's
+    -- line and column, and the @rule@ keyword's where there is one. A function
+    -- carried its @=@'s position until MS12 phase 344 (@~5n7tz@);
+    -- 'Thena.Instral.Concrete.RawFunction' says what it was and why.
+  }
+  deriving (Eq, Show)
+
+-- | __Match a run of things left to right, threading the name counter__ (MS12)
+-- and concatenating what each one bound.
+--
+-- **Left to right, and not @zipWithM@ over 'Maybe' as these were written until
+-- MS12**: the counter one match ends at is the counter the next one begins at,
+-- so the order is part of the answer rather than an accident of the combinator.
+-- A match that fails takes its counter with it, which is right — a pattern that
+-- minted and then did not match bound nothing anywhere, so the tokens it drew
+-- are free again.
+threading :: (Int -> x -> Maybe (Env, Int)) -> Int -> [x] -> Maybe (Env, Int)
+threading f = go
+  where
+    go k []       = Just ([], k)
+    go k (x : xs) = do
+      (bs, k1)  <- f k x
+      (bs', k2) <- go k1 xs
+      pure (bs ++ bs', k2)
+
+-- | Match one pattern against one value, answering the bindings it made **and
+-- where the name counter stands afterwards** (MS12).
 --
 -- **A pattern matches AS WRITTEN** — §3, his observation, and it is the line
 -- that keeps this function small: nothing here reduces, normalises or coerces.
 -- @3@ matches 'VInt' @3@ and nothing else.
-matchPattern :: GlobalEnv -> Pattern -> Value -> Maybe Env
-matchPattern env pt v = case (pt, v) of
-  (PVar n, _)              -> Just [(n, v)]
-  (PWild, _)               -> Just []
-  (PInt i,  VInt j)  | i == j -> Just []
-  (PChar c, VChar d) | c == d -> Just []
-  (PBool b, VBool c) | b == c -> Just []
-  (PText t, VText u) | t == u -> Just []
+--
+-- **Why a counter goes through a matcher** (§8). A pattern over a core term
+-- opens a binder, and opening one mints a token — so matching stops being a
+-- function of its inputs alone and every path that matches has to say where the
+-- counter got to. **No pattern mints yet**: every case here answers the counter
+-- it was handed, and the threading is what the binder patterns will need
+-- already in place rather than a signature change spread over the engine later.
+-- Nothing is put in the context and no line is added to the proof term by a
+-- match; @intro@ is what makes such a variable real, and it adopts the token it
+-- is handed.
+matchPattern :: GlobalEnv -> Int -> Pattern -> Value -> Maybe (Env, Int)
+matchPattern env k0 pt v = case (pt, v) of
+  (PVar n, _)              -> Just ([(n, v)], k0)
+  (PWild, _)               -> none
+  (PInt i,  VInt j)  | i == j -> none
+  (PChar c, VChar d) | c == d -> none
+  (PBool b, VBool c) | b == c -> none
+  (PText t, VText u) | t == u -> none
   -- **A written @\"…\"@ matches a name by its dotted form** (MS10), which is
   -- the pattern side of a literal being accepted where a name is wanted: a
   -- pattern is the only place a rule can take a name apart, and refusing one
   -- here would mean a clause could test a name's spelling in a @when@ and not
   -- in a @case@.
-  (PText t, VName g) | t == nameDotted g -> Just []
-  (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
-  (PSome a, VOption (Just x)) -> matchPattern' a x
-  (PNone,   VOption Nothing)  -> Just []
-  (PList ps mt, VList xs)  -> list ps mt xs
+  (PText t, VName g) | t == nameDotted g -> none
+  -- **…and an identifier by its word** (MS12 phase 353), for that same reason
+  -- and with the token ignored: a written literal is a word and nothing more,
+  -- so it says nothing about which binder this is. Without this case a clause
+  -- written @rule f "a" :- …@ over an 'Thena.Instral.Type.TIdent' parameter
+  -- would type-check — a text literal stands at that type since 2026-11-25 —
+  -- and then never fire.
+  (PText t, VIdent (Identifier (Ident w) _)) | t == w -> none
+  (PPair a b, VPair x y)   -> do
+    (as, k1) <- matchPattern' k0 a x
+    (bs, k2) <- matchPattern' k1 b y
+    pure (as ++ bs, k2)
+  (PSome a, VOption (Just x)) -> matchPattern' k0 a x
+  (PNone,   VOption Nothing)  -> none
+  (PList ps mt, VList xs)  -> list k0 ps mt xs
   -- **An object term, matched against the 'Core' it denotes** (MS6 phase
   -- 104c). See 'matchSkeleton' for the reduction rule, which is the whole of
   -- what is interesting here.
-  (PObject sk, VTerm t)    -> matchSkeleton env sk t
+  (PObject sk, VTerm t)    -> matchSkeleton env k0 sk t
+  -- **A core term, matched against itself** (MS12 phase 352, @~9j34x@). The
+  -- reduction rule is 'matchSkeleton'\'s and is stated once there.
+  (PCore cp, VTerm t)      -> matchCore env k0 cp t
   _                        -> Nothing
   where
-    matchPattern' = matchPattern env
+    none = Just ([], k0)
+    matchPattern' k = matchPattern env k
     -- A closed pattern must exhaust the list; an open one binds the remainder,
     -- and the remainder is itself matched, which is what makes @[a, ...[]]@ the
     -- long way of saying one element.
-    list [] Nothing   []   = Just []
-    list [] Nothing   _    = Nothing
-    list [] (Just t)  rest = matchPattern' t (VList rest)
-    list _  _         []   = Nothing
-    list (q : qs) mt' (x : rest) =
-      (++) <$> matchPattern' q x <*> list qs mt' rest
+    list k [] Nothing   []   = Just ([], k)
+    list _ [] Nothing   _    = Nothing
+    list k [] (Just t)  rest = matchPattern' k t (VList rest)
+    list _ _  _         []   = Nothing
+    list k (q : qs) mt' (x : rest) = do
+      (as, k1) <- matchPattern' k q x
+      (bs, k2) <- list k1 qs mt' rest
+      pure (as ++ bs, k2)
 
 -- | Match a call's arguments against a clause's parameters (MS5 phase 82).
 --
@@ -2051,8 +2484,79 @@ matchPattern env pt v = case (pt, v) of
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchClause :: GlobalEnv -> Rule -> [Value] -> Maybe Env
-matchClause env r = matchPatterns env (ruleParams r)
+matchClause :: GlobalEnv -> Int -> Rule -> [Value] -> Maybe (Env, Int)
+matchClause env k r = matchPatterns env k (ruleParams r)
+
+-- | __Match a clause\'s whole head__ — its parameters, then its focus pattern
+-- (MS12 phase 358, @~9j34x@).
+--
+-- **One function so that the chooser and the binder cannot disagree**, which is
+-- 'matchClause'\'s own argument one piece larger: 'Thena.Rules.clauses' calls
+-- this to filter and 'Thena.Rules.remade' calls it to bind, and a focus pattern
+-- that opens a binder mints, so two runs of it answer two environments.
+--
+-- **The parameters are matched first and the focus second**, which is the order
+-- they are written in, and the environments are concatenated — so a test may
+-- read what either bound ('Thena.Rules.clauses' passes the whole thing to
+-- 'Thena.Rules.holds').
+matchHead
+  :: GlobalEnv -> Int -> Cursor -> Rule -> [Value] -> Maybe (Env, Int)
+matchHead env k cur r vs = do
+  (bound, k1) <- matchClause env k r vs
+  (focused, k2) <- matchFocus env k1 cur (ruleFocus r)
+  pure (bound ++ focused, k2)
+
+-- | __Match the focus against a clause\'s @at@ pattern__ (MS12 phase 358).
+--
+-- **A clause that wrote no @at@ matches every focus and binds nothing**, and
+-- that is not a special case: it is what matching no pattern against anything
+-- answers.
+--
+-- **A component pattern matches a COMPONENT and nothing else**, so a focus
+-- standing on a constraint or inside a term fails every one of the five forms.
+-- A constraint binds nothing and is not a component (@spec\/machine.md@ §3.3),
+-- and a focus inside a term is a position in a term rather than a binding, so
+-- there is nothing for any of the five to be about.
+--
+-- **The binder position is matched against the component\'s own identity** —
+-- its word and its variable, as the 'Identifier' of @~gr236@ — so a word read
+-- off the focus carries the token that says /this binder/, and an op that takes
+-- one can be handed it directly.
+matchFocus
+  :: GlobalEnv -> Int -> Cursor -> Maybe ComponentP -> Maybe (Env, Int)
+matchFocus _   k _   Nothing   = Just ([], k)
+matchFocus env k cur (Just cp) = case focus cur of
+  OnComponent c -> component c
+  _             -> Nothing
+  where
+    -- The component's identity as a value: the word it prints and the variable
+    -- it is. **Always a 'Just'** — a component in a development has been opened
+    -- at a real variable, which is the difference between this and a word a
+    -- @core\`…\`@ pattern took off a binder it opened itself.
+    ident x i = VIdent (Identifier i (Just x))
+
+    -- The identity of whichever of the five it is — all five carry one.
+    identOf c = case c of
+      Component.Assume   x i   _ -> ident x i
+      Component.Define   x i _ _ -> ident x i
+      Component.Claim    x i   _ -> ident x i
+      Component.Guess    x i _ _ -> ident x i
+      Component.Quantify x i   _ -> ident x i
+
+    run ps = matchPatterns env k (map snd (componentPSlots cp)) ps
+
+    component c = case (cp, c) of
+      -- **The one form that does not name a shape** (MS12 phase 363,
+      -- @~9m27n@): every component has an identity, so this binds it and asks
+      -- nothing else. 'componentPSlots' is what says there is one position,
+      -- so the run below needs no case of its own beyond the value.
+      (CompAny      {}, _)                          -> run [identOf c]
+      (CompAssume   {}, Component.Assume   x i   t) -> run [ident x i, VTerm t]
+      (CompDefine   {}, Component.Define   x i v t) -> run [ident x i, VTerm v, VTerm t]
+      (CompClaim    {}, Component.Claim    x i   t) -> run [ident x i, VTerm t]
+      (CompGuess    {}, Component.Guess    x i _ t) -> run [ident x i, VTerm t]
+      (CompQuantify {}, Component.Quantify x i   t) -> run [ident x i, VTerm t]
+      _                                             -> Nothing
 
 -- | Match a run of patterns against a run of values (MS5 phase 82).
 --
@@ -2063,10 +2567,11 @@ matchClause env r = matchPatterns env (ruleParams r)
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchPatterns :: GlobalEnv -> [Pattern] -> [Value] -> Maybe Env
-matchPatterns env ps vs
+matchPatterns :: GlobalEnv -> Int -> [Pattern] -> [Value] -> Maybe (Env, Int)
+matchPatterns env k ps vs
   | length ps /= length vs = Nothing
-  | otherwise              = concat <$> zipWithM (matchPattern env) ps vs
+  | otherwise =
+      threading (\k' (p, x) -> matchPattern env k' p x) k (zip ps vs)
 
 -- | Match an object term's shape against a 'Core' (MS6 phase 104c).
 --
@@ -2084,42 +2589,177 @@ matchPatterns env ps vs
 --
 -- Reduction is weak head normal form, so it exposes one level; the recursion
 -- does the rest as it descends.
-matchSkeleton :: GlobalEnv -> Skeleton Pattern -> Core -> Maybe Env
-matchSkeleton env sk t = case here t of
+matchSkeleton :: GlobalEnv -> Int -> Skeleton Pattern -> Core -> Maybe (Env, Int)
+matchSkeleton env k sk t = case here t of
   Just bs -> Just bs
+  -- **The second attempt begins from the counter the first was handed**, not
+  -- from wherever the first got to: an attempt that failed bound nothing, so
+  -- the tokens it drew were never anybody's. That falls out of 'Maybe' here
+  -- rather than being arranged.
   Nothing -> here (whnf env [] t)
   where
     here term = case sk of
-      SHole AtTerm p          -> matchPattern env p (VTerm term)
+      SHole AtTerm p          -> matchPattern env k p (VTerm term)
       SHole (AtPrimitive _) p -> case term of
-        Primitive l -> matchPattern env p (primitiveValue l)
+        Primitive l -> matchPattern env k p (primitiveValue l)
         _           -> Nothing
       SLit l -> case term of
-        Primitive l' | l == l' -> Just []
+        Primitive l' | l == l' -> Just ([], k)
         _                      -> Nothing
+      -- **'Thena.Tactics.Eliminate.spineOf' and not a copy of it** (MS12 phase
+      -- 352): a saturated former is a 'Canonical' and a written one is nested
+      -- 'App's over a 'Global', and the one walk reads both — plus the
+      -- 'Canonical' with further arguments applied, which the copy that used to
+      -- stand here did not. **The levels are ignored here**, and the object
+      -- language is why: an object term's constructors are generated at one
+      -- level, so a skeleton has no level position to compare.
       SNode nm kids -> case spineOf term of
-        Just (nm', args)
+        Just (nm', _, args)
           | nm == nm', length args == length kids ->
-              concat <$> zipWithM (matchSkeleton env) kids args
+              threading (\k' (sk', a) -> matchSkeleton env k' sk' a) k
+                        (zip kids args)
         _ -> Nothing
 
--- | A constructor application, however it is spelled.
+-- | Match a core term's shape against a 'Core' (MS12 phase 352, @~9j34x@).
 --
--- **Both spellings arise and neither is wrong**: elaboration leaves a
--- 'Canonical' once the wrapper has reduced, and a term written out by
--- 'Thena.Language.Build.buildTerm' is the wrapper applied.
-spineOf :: Core -> Maybe (GlobalName, [Core])
-spineOf term = case term of
-  Canonical c _ args -> Just (c, args)
-  Global c _         -> Just (c, [])
-  App {}             -> case flatten term [] of
-    (Global c _, args) -> Just (c, args)
-    _                  -> Nothing
-  _ -> Nothing
+-- **The same two attempts 'matchSkeleton' makes, and for the same reason** —
+-- his rule of 2026-09-20, that a term is tried as it is written and then
+-- reduced and tried again. It is one rule for every pattern, so a core pattern
+-- gets it rather than a rule of its own, and the counter the second attempt
+-- begins from is the one the first was handed.
+--
+-- **A BINDER IS WHERE THIS MINTS** (MS12 phase 355), and it is the only place:
+-- opening a scope needs a variable to open it at, so the counter the matchers
+-- have threaded since MS12 phase 351 is finally spent. Nothing is put in the
+-- context and no line is added to the proof term — @spec\/machine.md@ §8, /a
+-- deconstruction form is never a proof step/ — so the variable is not yet real,
+-- and @intro@ adopting the token is what makes it so.
+--
+-- **A token this mints can be handed out twice and that is answered** —
+-- @~thwhg@, his ruling of 2026-11-26: an alternative is matched again from the
+-- counter as it stands when it is taken (§7.6), so an abandoned branch's spent
+-- tokens are never re-drawn.
+matchCore :: GlobalEnv -> Int -> CoreP Pattern -> Core -> Maybe (Env, Int)
+matchCore env k cp t = case here t of
+  Just bs -> Just bs
+  Nothing -> here (whnf env [] t)
   where
-    flatten u acc = case u of
-      App f a -> flatten f (a : acc)
-      _       -> (u, acc)
+    here term = case cp of
+      -- **A hole takes the term it stands at**, whatever it is: a @${x}@ is the
+      -- only binding marker, and what fills one is a 'VTerm'.
+      CPHole p -> matchPattern env k p (VTerm term)
+      CPLit l  -> case term of
+        Primitive l' | l == l' -> ok
+        _                      -> Nothing
+      -- **A level is compared whole** (§8, /nothing matches inside a level
+      -- expression/), and 'Thena.Core.Level' equality is equality of normal
+      -- forms — so @Type₀@ matches @max 0 0@ as it should.
+      CPUniverse n -> case term of
+        Universe l | l == levelOfNat n -> ok
+        _                              -> Nothing
+      CPTrusted c a b -> case term of
+        -- **All three fields**, the derived @actual@ included: a pattern may
+        -- stand at it, which is what makes the obligation readable from a rule.
+        Trusted c' a' b' -> run [(c, c'), (a, a'), (b, b')]
+        _                -> Nothing
+      -- **A binder is opened to be matched**, which is what makes this the one
+      -- form that mints: the token goes into the 'Identifier' the binder
+      -- position binds and the body is opened at it, so @${E}@ holds an
+      -- ordinary term with a free variable where the binder's occurrences were.
+      CPPi x d b -> case term of
+        Term.Pi j dom cod  -> under j x [(d, dom)] b cod
+        _                  -> Nothing
+      CPLam x d b -> case term of
+        Term.Lam j dom cod -> under j x [(d, dom)] b cod
+        _                  -> Nothing
+      CPLet x v ty b -> case term of
+        Term.Let j val sty cod -> under j x [(v, val), (ty, sty)] b cod
+        _                      -> Nothing
+      CPEliminate d ls ps m ms is tg -> case term of
+        Term.Eliminate d' ls' ps' m' ms' is' tg'
+          | d == d'
+          , length ps == length ps'
+          , length ms == length ms'
+          , length is == length is'
+          , Just (b0, k1) <- levels k ls ls' ->
+              first (b0 ++) <$>
+                runFrom k1 (zip ps ps' ++ [(m, m')] ++ zip ms ms'
+                              ++ zip is is' ++ [(tg, tg')])
+        _ -> Nothing
+      -- **A word and an application are one case**, because a constructor
+      -- application has two spellings and the head is where the name is: the
+      -- pattern's spine is flattened and so is the term's, which is the line
+      -- 'spineOf' draws for 'matchSkeleton' one language up.
+      CPName {} -> applied
+      CPApp {}  -> applied
+      where
+        ok = Just ([], k)
+        run = runFrom k
+
+        -- **The counter is a parameter of this and not closed over**, because
+        -- a level argument is matched before the sub-terms are and may itself
+        -- have minted (MS12 phase 361).
+        runFrom = threading (\k' (q, u) -> matchCore env k' q u)
+
+        -- **A LEVEL ARGUMENT IS MATCHED, NOT ONLY COMPARED** (MS12 phase 361,
+        -- @~bkrvn@). A numeral is compared whole — 'Thena.Core.Level' equality
+        -- is equality of normal forms, so @{0}@ matches @max 0 0@ — and a
+        -- position takes the level it stands at, whatever it is: a join and a
+        -- rigid parameter are exactly the levels a rule cannot write down, and
+        -- taking one whole is what @~bkrvn@ was about. Nothing matches
+        -- /inside/ a level expression (@spec\/machine.md@ §8).
+        levels k' ls ls'
+          | length ls /= length ls' = Nothing
+          | otherwise = threading one k' (zip ls ls')
+          where
+            one k'' (l, lv) = case l of
+              LPNat n  | lv == levelOfNat n -> Just ([], k'')
+                       | otherwise          -> Nothing
+              LPHole p -> matchPattern env k'' p (VLevel lv)
+
+        -- **Mint, bind the binder, then the sub-terms left to right** — the
+        -- order 'Thena.Instral.Pattern.corePSlots' reports, so what a hole
+        -- binds and what the type checker said it takes cannot disagree.
+        --
+        -- **The token is minted whether or not the pattern names it.** Opening
+        -- the scope is what needs it, and an arrow — a @∀@ with a 'PWild'
+        -- binder — opens one like any other.
+        under j x before body cod =
+          let (y, k1) = Term.fresh k
+           in do (b0, k2) <- matchPattern env k1 x (VIdent (Identifier j (Just y)))
+                 (b1, k3) <- runFrom k2 before
+                 (b2, k4) <- matchCore env k3 body (Term.open y cod)
+                 Just (b0 ++ b1 ++ b2, k4)
+
+        -- **A pattern whose head is a hole is matched node by node**, not
+        -- through the spine: @${f} ${a}@ against @App (App g x) y@ binds @f@ to
+        -- @App g x@, and flattening both sides would have asked for two
+        -- arguments where one was written.
+        applied = case (corePSpine cp, term) of
+          ((CPHole {}, _), _) -> structural
+          ((CPName g ls, args), _) -> case spineOf term of
+            Just (g', ls', args')
+              | g == g', length args == length args'
+              , Just (b0, k1) <- levels k ls ls' ->
+                  first (b0 ++) <$> runFrom k1 (zip args args')
+            -- A written word that the term does not head may still be an
+            -- ordinary application underneath, which @structural@ is what
+            -- reads; a bare word with no arguments has nothing to try.
+            _ -> structural
+          _ -> structural
+
+        structural = case (cp, term) of
+          (CPApp f a, App x y) -> run [(f, x), (a, y)]
+          _                    -> Nothing
+
+-- | A core pattern's application spine: its head, and the arguments written
+-- after it (MS12 phase 352).
+corePSpine :: CoreP a -> (CoreP a, [CoreP a])
+corePSpine = go []
+  where
+    go acc cp = case cp of
+      CPApp f a -> go (a : acc) f
+      _         -> (cp, acc)
 
 -- | A @Core@ literal as the @instral@ value a hole at a token class binds.
 primitiveValue :: Literal -> Value
@@ -2138,7 +2778,7 @@ primitiveValue l = case l of
 -- offer something that will not work. Prolog has exactly this.
 --
 -- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5);
--- phase 17b adds a fifth when @Prove@ carries a hint, and phase 41 removes it
+-- phase 17b adds a fifth when @Dispatch@ carries a hint, and phase 41 removes it
 -- again with the hint itself.
 --
 -- == A test may ask about an argument — MS4 phase 47
@@ -2155,14 +2795,13 @@ primitiveValue l = case l of
 -- is — for the reason §8 gives about string literals, that a grammar policing
 -- operand kinds would be the rule language's type system in the wrong place
 -- (@ms2\/CLOSEOUT.md@ 4b, deferred at his direction 2026-09-03).
+-- **THERE ARE NO FOCUS TESTS LEFT** (MS12 phase 363, @~9m27n@). @at@ asks all
+-- four questions they asked — @at ? _ : _@, @at ? _ ≐ _ : _@, @at _ = _ : _@
+-- and, since his ruling of 2026-11-27, @at _@ for /any/ component, which is the
+-- one @focus-is-component@ held on for. **Every test here is a question about a
+-- term the clause was handed**, and that is now the whole of what a test is.
 data Test
-  = FocusIsHole     -- ^ the focus is a @? x : S@ component
-  | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
-  | FocusIsComponent
-    -- ^ the focus is a component of the chain rather than a core term (MS4
-    -- phase 49c). What @along@ and the other component moves need, and the one
-    -- thing that is true throughout a walk over a binder group.
-  | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
+  = GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand
     -- ^ the operand is a surface term whose focus is a name (MS4 phase 47)
@@ -2241,6 +2880,20 @@ data Test
     -- reason: a clause that matches on one keeps declining a group it was never
     -- written for. The three really are three — each is bound under a name from
     -- a different place.
+  | NumberIsPositive Operand
+    -- ^ **a whole number is more than nought** (MS12 phase 347) —
+    -- @number-is-positive n@, and the only head test in the language that asks
+    -- about a number.
+    --
+    -- **Its complement is a pattern and not a second test.** @step ‹n›@\'s other
+    -- clause is written @rule step 0 :- do@, matching the literal, which is what
+    -- 'Thena.Instral.Pattern.PInt' is for; so the two clauses are disjoint and
+    -- the dispatch makes no choice point between them, which is what the
+    -- @let-is-annotated@ / @let-is-bare@ pairing exists to achieve.
+    --
+    -- **A negative count matches neither**, and that is deliberate: @step -3@ is
+    -- not a number of moves, so /no rule matches/ is the honest answer rather
+    -- than a silent nought.
   | SameName Operand Operand
     -- ^ two names are the same word — @same-name a b@ (MS9 phase 183).
     --
@@ -2379,6 +3032,8 @@ opKeyword o = case o of
   Value _      -> "value"
   Lambda _ _   -> "lambda"
   NameText _   -> "name-text"
+  NameIdent _  -> "name-ident"
+  IdentTerm _  -> "ident-term"
   Along        -> "along"
   Into         -> "into"
   CrossType    -> "cross"
@@ -2387,6 +3042,7 @@ opKeyword o = case o of
   Goto _       -> "goto"
   GotoNamed _  -> "goto-named"
   GotoRoot     -> "goto-root"
+  NextGoal     -> "next"
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"
@@ -2395,11 +3051,12 @@ opKeyword o = case o of
   Attack       -> "prim-attack"
   IntroPi _    -> "prim-lambda"
   IntroLet _   -> "prim-let"
+  Rename _     -> "prim-rename"
   Try _        -> "prim-try"
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"
   Abandon      -> "prim-abandon"
-  Prove        -> "prim-prove"
+  Dispatch        -> "prim-step"
   Call _ _     -> "call"
   Return _     -> "return"
   Some _       -> "some"
@@ -2409,10 +3066,14 @@ opKeyword o = case o of
   FreshName _  -> "fresh-name"
   Here         -> "here"
   Arrow _ _    -> "arrow"
+  MakeForall {} -> "make-forall"
+  MakeLambda {} -> "make-lambda"
+  MakeLet {}    -> "make-let"
   ApplyTo _ _  -> "apply-to"
   FreshLevel     -> "fresh-level"
   LevelOf _      -> "level"
   UniverseAt _   -> "universe-at"
+  OneLess _ -> "one-less"
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
   SurfaceLiteralOf _ -> "surface-literal"
@@ -2449,6 +3110,7 @@ opKeyword o = case o of
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
+  InScopeAt    -> "in-scope"
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
@@ -2481,7 +3143,9 @@ opKeyword o = case o of
   ConstructorArguments _ -> "constructor-arguments"
   ConstructorRecursiveArguments _ -> "constructor-recursive-arguments"
   ApplyNext _ _ -> "apply-next"
+  NextArgumentName _ -> "next-argument-name"
   ExpandImplicits _ -> "expand-implicits"
+  RecordImplicits _ -> "record-implicits"
   AppHead _ -> "app-head"
   AppFirstArgument _ -> "app-first-argument"
   AppTail _ -> "app-tail"

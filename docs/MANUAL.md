@@ -152,7 +152,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ4695)
+Type : Type (suc ?ℓ4600)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -184,8 +184,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₈₉} (A : Type (ℓ₈₉)) : A -> A -> Type (ℓ₈₉) where
-  { refl : ∀ (a : A) -> Eq {ℓ₈₉} A a a }
+data Eq {ℓ₆₃} (A : Type (ℓ₆₃)) : A -> A -> Type (ℓ₆₃) where
+  { refl : ∀ (a : A) -> Eq {ℓ₆₃} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -194,7 +194,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ4702)) (a : A) -> Eq {?ℓ4702} A a a
+refl : ∀ (A : Type (?ℓ4607)) (a : A) -> Eq {?ℓ4607} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -213,8 +213,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₅₈₅ ℓ₅₈₆} (A : Type (ℓ₅₈₅)) (B : Type (ℓ₅₈₆)) : Type (ℓ₅₈₅ ⊔ ℓ₅₈₆) where
-  { both : A -> B -> And {ℓ₅₈₅ ℓ₅₈₆} A B }
+data And {ℓ₅₅₁ ℓ₅₅₂} (A : Type (ℓ₅₅₁)) (B : Type (ℓ₅₅₂)) : Type (ℓ₅₅₁ ⊔ ℓ₅₅₂) where
+  { both : A -> B -> And {ℓ₅₅₁ ℓ₅₅₂} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -331,8 +331,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₄₉₁₀} (A : Type (ℓ₄₉₁₀)) : Type (ℓ₄₉₁₀) where
-  { Box.box : A -> Box {ℓ₄₉₁₀} A }
+data Box {ℓ₄₈₁₅} (A : Type (ℓ₄₈₁₅)) : Type (ℓ₄₈₁₅) where
+  { Box.box : A -> Box {ℓ₄₈₁₅} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -415,55 +415,118 @@ A proof starts as a single **hole**: a name, a type, and nothing else.
 `attack` turns the hole into a *guess* — a hole with a proposed body you are
 about to build. `intro` moves a `∀` binder out of the goal and into the body.
 
+**A binder the statement did not name gets one anyway.** `∀ (A : Type₀) -> A -> A`
+names `A` and says nothing about the argument, so `intro` calls it `x` — and `x1`,
+`x2` for further ones, skipping any word already in scope. The name is real: it is
+what the development shows and what you write to refer to the argument. Say
+`intro "a"` to choose the name yourself.
+
 ```
 thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> :show
-▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+  let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
-    λ (_ : A) ->
-    let ? id1 : A in
+    λ (x : A) ->
+▶   let ? id1 : A in
     id1
   ) in
   id
 ```
 
 The inner hole is `id1`, not `id`: every component in a development has a name
-of its own, so that `goto-named "‹name›"` always means one place.
+of its own, so that one word always means one place.
 
-There are three `goto`s and they differ in what they take. `goto-named "h"`
-searches for a hole by the name you can see; `goto` is the one a rule body uses,
-taking the variable it is holding rather than a name; and `goto-root` takes
-nothing and goes to the top of the development. `goto-root` is the only move
-that cannot fail — `back` refuses when there is nothing above it, and
-`goto-root` is already where it is going.
-
-Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
-down to it — `into` enters the guess body, `along` steps past a binder — and ask
-where you are:
+**Every goal is bound to a variable of its own name, so `goto id1` is what you
+type.** A goal is a hole or a guess — `id` above is a guess, `id1` a hole — and
+the session binds each of them before it reads your line. So the word you can
+see in the development is a variable holding that position, and `goto` takes it:
 
 ```
-thena spine> into
-thena spine> along
-thena spine> along
+thena spine> goto id1
+thena spine> goto id
+```
+
+There are three `goto`s and they differ in what they take. `goto` is the exact
+one, taking the variable that binds a position: a rule body holds one because
+`claim` and `define` hand it over, and at the prompt the session hands you one
+per goal. `goto-named "h"` searches the development for a component of that
+name, which is the one to reach for when what you have is only a name — read off
+a printed term, say — and it takes a string rather than a variable, so it is
+written `goto-named "h"` and not `goto-named h`. `goto-root` takes nothing and
+goes to the top. `goto-root` is the only move that cannot fail — `back` refuses
+when there is nothing above it, and `goto-root` is already where it is going.
+
+**And `next` takes nothing either, because the development already says where to
+go.** It moves to the goal to work on next: the first unfinished goal in the
+innermost piece of work that still has one. A *piece of work* is a guess body —
+what `attack` opens — and the outermost one is the development itself. So while
+there is a goal inside the part you are working on, `next` goes there; when that
+part is finished, it widens, and the goal it then reaches is usually the guess
+that encloses you. That last step is the `goto-root` at the end of a proof.
+
+Here there is one unfinished goal, `id1`, so that is where it goes:
+
+```
+thena spine> next
 thena spine> :where
 focus
   let ? id1 : A in
 path
-  root ▸ ≐ id ▸ A ▸ _
+  root ▸ ≐ id ▸ A ▸ x
 context
   A : Type₀
-  _ : A
+  x : A
 type
   A
 ```
 
+Three things follow from the definition and are worth knowing.
+
+- **Standing on a goal, `next` stays put.** So you can write it before every
+  step without skipping anything.
+- **It reaches goals you cannot name.** A tactic that claims a hole for an
+  argument names it itself, so there was no word to type; `next` needs none.
+- **It refuses once nothing is left**, saying *there is no goal left to go to*.
+  That is how a strategy written in the rule language knows to stop.
+
+**Thena keeps no list of open goals.** There is no queue to reorder, so nothing
+defers a goal and comes back to it later — if you want to leave one for now,
+move away from it yourself with `goto`.
+
+`goto` is also the more precise of the first two. A search by name takes the
+first component of that name from the root, and a name is unique in a
+development — but the name a nested position *asks* for is not always the name
+it gets, so a search can land on an outer position while the variable cannot.
+
+That is the position the proof carries on from, and nothing had to be navigated
+to reach it. **Every operation that changes the development acts at the cursor**,
+so `attack` left the cursor on the hole it opened and each `intro` left it on
+what was still to be proved — the two λs went in above it, and the hole that
+remains is the `id1` of type `A` printed above.
+
 `try-core` proposes a term for the hole; `solve` accepts it. Then walk back out,
 `solve`-ing each guess as you go, and finish:
 
+`try-in-scope` is `try-core` with the term left to the machine: it reads the
+context at the focus, offers each entry in turn starting with the innermost, and
+a candidate whose type does not fit the goal is refused and the next one taken.
+Here that would be `x` on the first try.
+
+`fit-in-scope` is the same walk for a hypothesis that has to be applied to
+something first: it takes a candidate, claims a hole for one argument, and asks
+whether the application fits the goal, claiming another argument if it does not.
+A hypothesis whose type is not a function is refused at once.
+
+**These two are the tactics in the shipped base that close a goal without being
+told what to close it with, and they are the first two the engine tries**, so a
+bare `step` reaches them before anything else. The order matters: `attack`
+always applies at a hole and never fails, so with `attack` ahead of them a
+`step` at a goal that a hypothesis closes outright would never get to either.
+
 ```
-thena spine> try-core core`_`
+thena spine> try-core core`x`
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -473,7 +536,7 @@ thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show id
 id : ∀ (A : Type₀) -> A -> A
-id = let id = λ (A : Type₀) (_ : A) -> let id1 = _ : A in id1 : ∀ (A : Type₀) -> A -> A in id
+id = let id = λ (A : Type₀) (x : A) -> let id1 = x : A in id1 : ∀ (A : Type₀) -> A -> A in id
 ```
 
 `qed` re-checks the finished term with the kernel before admitting it. If it
@@ -487,11 +550,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ5790)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ5693)) -> A -> A
 thena spine> try-core core`\ (A : Type) (a : A) -> a`
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₅₈₀₂} : ∀ (A : Type (ℓ₅₈₀₂)) -> A -> A   ∎
+idPoly {ℓ₅₇₀₅} : ∀ (A : Type (ℓ₅₇₀₅)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -500,11 +563,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ5804) -> Type (?ℓ5805)
+proving lift : Type (?ℓ5707) -> Type (?ℓ5708)
 thena spine> try-core core`\ (x : Type) -> x`
 thena spine> solve
 thena spine> qed
-lift {ℓ₅₈₁₃ ℓ₅₈₁₄} : (ℓ₅₈₁₃ ≤ ℓ₅₈₁₄) ⊢ Type (ℓ₅₈₁₃) -> Type (ℓ₅₈₁₄)   ∎
+lift {ℓ₅₇₁₆ ℓ₅₇₁₇} : (ℓ₅₇₁₆ ≤ ℓ₅₇₁₇) ⊢ Type (ℓ₅₇₁₆) -> Type (ℓ₅₇₁₇)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -539,7 +602,11 @@ until you do, `:theorem` will tell you there is one in progress.
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
+| `intro "a"` | the same, naming the binding `a` rather than letting it be named for you |
+| `rename "a"` | give the binding you are standing on the word `a` |
 | `` try-core core`term` `` | propose a term for the focused hole |
+| `try-in-scope` | the same, with the term found for you from what is in scope |
+| `fit-in-scope` | the same again, for a hypothesis that has to be applied to something |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
@@ -672,8 +739,6 @@ thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 proving plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 ```
@@ -727,9 +792,9 @@ says where the term begins and ends, and inside it nothing needs parenthesising.
 language is entitled to, and an argument in no fence is neither language: it is
 a name, a number or a string, read exactly as a rule body reads one. That is why
 `goto-named` takes `goto-named "h"` and not `goto-named h` — the second is a
-*reference*, and at the prompt there is usually nothing bound to it. (`goto` is
-a separate word taking the *variable* a hole binds, which a rule body holds and
-the prompt rarely does.)
+*reference*, and what it refers to is a goal if the development has one of that
+name and nothing otherwise. (`goto` is the separate word taking the *variable* a
+position binds, which is what a goal's name is bound to; §5 has it.)
 
 The `-core` suffix marks the tactics that take a **development-calculus** term.
 The surface language exists beside it — `:infer`, `declare` and a `.thena` proof
@@ -767,13 +832,21 @@ thena spine> :theorem plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) 
 proving plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> induction-core core`n`
 subgoals: zeroMethod, succMethod
 subgoals: zeroCase
 subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now — walk up to that binder and rename it to give it one
 ```
+
+The warning is the split telling you what it just did to your name for the
+argument. Each case re-binds `n` to that case's own shape, so that writing `n`
+inside the step case gets you the refined thing — the context below shows
+`n = succ u`. The argument the theorem quantified is still in the development
+and still needed, but no word reaches it any more, so it prints as `n†`: the
+dagger marks a binding that has lost its word, and it appears wherever that
+binding or a reference to it is printed. `rename` gives it a word back if you
+want to name it.
 
 `zeroCase` and `succCase` are the two to prove. Walk into the step case and
 look at it:
@@ -784,14 +857,14 @@ thena spine> :where
 focus
   let ? succCase1 : Eq {0} Nat (plus (succ u) zero) (succ u) in
 path
-  root ▸ ≐ plusZeroAgain ▸ n ▸ zeroCase ▸ zeroMethod ▸ ≐ succCase ▸ u ▸ ih ▸ n1
+  root ▸ ≐ plusZeroAgain ▸ n† ▸ zeroCase ▸ zeroMethod ▸ ≐ succCase ▸ u ▸ ih ▸ n
 context
-  n : Nat
+  n† : Nat
   zeroCase : Eq {0} Nat (plus zero zero) zero
   zeroMethod : Eq {0} Nat (plus zero zero) zero
   u : Nat
   ih : Eq {0} Nat (plus u zero) u
-  n1 = succ u : Nat
+  n = succ u : Nat
 type
   Eq {0} Nat (plus (succ u) zero) (succ u)
 ```
@@ -841,122 +914,122 @@ impossible is not posted at all; you are shown only what is left to do.
 
 Thena has a small base of named rules, and it can pick one for you.
 
-`:matches` lists the rules that apply where you are standing. `prove` runs one.
+`:matches` lists the rules that apply where you are standing. `step` runs one of
+them — one move, not a proof. `step ‹n›` makes `n` moves, so `step 5` is five
+dispatches in a row and stops early only if one of them fails.
+
+**There is no `prove`.** The word is kept free for a base of your own to define,
+and nothing is shipped under it; typed as it stands, it answers *no rule is
+called prove*.
 
 ```
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> :matches
-intro
-solve
-regret
-prove
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-thena spine> prove
-chose 5340: intro
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
+thena spine> step
+chose 5225: try-in-scope
+backtracking to 5225: fit-in-scope
+backtracking to 5225: intro
 ```
 
-Three rules matched, so the engine reports which one it took and leaves a
-**choice point** behind — the number is its identifier.
+Six clauses matched. The engine took them in order, reporting each one it
+backtracked out of, and when one succeeded it left a **choice point** behind —
+the number is its identifier.
 
 ```
 thena spine> :choices
-5340  intro   untried: solve, regret, prove
+5225  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 ```
 
+Each alternative names **the file and line its clause is written at**. That is
+not decoration: the thing the engine picks is a *clause*, and a rule may have
+several, so a fork between two clauses written under one name would otherwise
+print that name twice and tell you nothing about the difference. With the line
+you can go and read the clause that is about to run.
+
 `retry` backtracks to the nearest choice point and takes the next alternative.
-Here both remaining alternatives fail, so it exhausts the choice point and
-undoes the whole thing:
+Here that is `attack`, which applies at any hole, so the `intro` is undone and a
+guess stands where its λ would have gone — and the choice point is still there,
+with two alternatives left:
 
 ```
 thena spine> retry
-retrying 5340: solve
-backtracking to 5340: regret
+retrying 5225: by-induction
+backtracking to 5225: attack
 thena spine> :show
-▶ let ? id : ∀ (A : Type₀) -> A -> A in
+  let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+    let ? id1 : ∀ (A : Type₀) -> A -> A ≐ (
+▶     let ? id11 : ∀ (A : Type₀) -> A -> A in
+      id11
+    ) in
+    id1
+  ) in
   id
 thena spine> :choices
-5340  regret   untried: prove
+5225  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -976,55 +1049,127 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 ```
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
-thena spine> prove
-chose 4690: attack
+thena spine> step
+chose 4595: try-in-scope
+backtracking to 4595: fit-in-scope
+backtracking to 4595: intro
+backtracking to 4595: by-induction
+backtracking to 4595: attack
+thena spine> back
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 4690, which was chosen before this line — retry 4690 to take it
+  undoing that would backtrack to 4595, which was chosen before this line — retry 4595 to take it
 ```
 
-`regret` took the guess back off and `back` had nothing left to pop. Without the
-boundary, that `back` would have taken `prove`'s untried alternatives and put the
+`back` left the guess that `attack` had put the cursor inside, `regret` took the
+guess back off, and the second `back` had nothing left to pop. Without the
+boundary, that `back` would have taken `step`'s untried alternatives and put the
 guess back — a navigation command undoing the line before it.
 
-Nothing is forbidden: `retry 685` still takes it. The point is that crossing out
+Nothing is forbidden: `retry 4595` still takes it. The point is that crossing out
 of your own line is something you ask for, because backtracking past a line
 takes a route on which that line was never typed — so the command that caused it
 could not have been given.
 
 A choice point the *current* line made is reached as it always was, which is why
-`retry` above still falls through `solve` into `regret` in one command.
+the `step` above falls through `try-in-scope`, `fit-in-scope` and `intro` into
+`attack` in one command.
 
 ### What is on offer here
 
 `:matches` lists every rule whose head passes at the focus — the same list the
 engine would search, in the order it would search it. **It takes no argument.**
-A rule that wants one is shown with a placeholder for it, and elaboration's
-clauses are in the list like everything else, because elaboration is search:
+
+**One line per rule**, where a rule is a name and a number of arguments: a name
+written with several clauses is one line, because nothing you can type picks a
+clause. Each argument is shown as a placeholder, and the type after the colon is
+what the system worked out the rule takes and gives — the one its file declared
+if it declared one, and otherwise the one inference found. Elaboration is in the
+list like everything else, because elaboration is search:
 
 ```
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-…
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 ```
+
+`:rules` is the other half of the picture and it is still per clause: it lists
+what is written in each base, and a clause is what is written there.
 
 ### Watching the machine
 
 `:step on` puts the engine in single-step mode, and `:step` advances one
 instruction. This is how you see what a rule actually does — `attack` is a rule
-whose body is one primitive:
+whose body is two instructions, the primitive that opens the guess and the move
+that puts the cursor on the hole it opened:
 
 ```
 thena spine> :step on
 thena spine> attack
 pc
   0  prim-attack
+  1  into
 env
   (empty)
 stack
@@ -1034,7 +1179,7 @@ stack
   call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  (empty)
+  0  into
 env
   (empty)
 stack
@@ -1068,26 +1213,26 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ4878)
+  l = Type (?ℓ4783)
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 186 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ4880)
+  l = Type (?ℓ4785)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 186 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ4876
-solved: ?ℓ4878
-solved: ?ℓ4880
+solved: ?ℓ4781
+solved: ?ℓ4783
+solved: ?ℓ4785
 already equal
 thena spine> :step off
 ```
@@ -1219,7 +1364,6 @@ trust: no undischargeable trust
 thena spine> :theorem reckless : Eq {0} Nat zero (succ zero)
 proving reckless : Eq {0} Nat zero (succ zero)
 thena spine> attack
-thena spine> into
 thena spine> try-core core`liar {0}`
 thena spine> solve
 thena spine> back
@@ -1272,7 +1416,6 @@ trust: no undischargeable trust
 thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
 proving decides : Dec {0 0} (Eq {0} String "x" "x")
 thena spine> attack
-thena spine> into
 thena spine> try-core core`String.dec "x" "x"`
 thena spine> solve
 thena spine> back
@@ -1319,10 +1462,10 @@ You can have several proofs open, park them, and come back.
 | | |
 |---|---|
 | `:theorem ‹x› : ‹T›` | start a proof |
-| `:suspend` | park the current proof under its name |
-| `:resume ‹name›` | pick a parked proof back up |
+| `:suspend` | park what you are working on, under its name |
+| `:resume ‹name›` | pick a parked one back up |
 | `:proofs` | list what is open and what is parked |
-| `:abandon` | throw the current proof away |
+| `:abandon` | throw away what you are working on |
 | `:undo` | undo the last command that changed anything |
 | `qed` | certify and admit |
 
@@ -1373,7 +1516,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (120 rules)
+loaded standard (130 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for
@@ -1865,6 +2008,139 @@ A `:load` inside a file is still refused — *a :load inside a loaded file is no
 followed*. It is the construct `import` and `consult` replace, and it is the one with
 no cycle check behind it; an `import` cycle is refused by name.
 
+### An import can stop in the middle and hand you the wheel
+
+A module's declarations are turned into **one program**, and that program is run by
+the same machine, through the same loop, as a line you type. So an import is one line
+whose program happens to be long — and **a program can stop**.
+
+It stops when a rule reaches `yield`. Nothing in the shipped base does; a base you
+consult may, and `examples/demo/Demo08Pausing.thena.rules` is two lines that do:
+
+```
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"
+```
+
+With that consulted, importing a file that leaves a placeholder hands you **that
+declaration's own goal**, in the module's own scope. `Demo07Holes` declares
+`zeroIsValue` and leaves its proof a `_`:
+
+*From a fresh session.*
+
+```
+thena spine> :consult examples/demo/Demo08Pausing.thena.rules
+…
+thena spine> import examples.demo.pending.Demo07Holes
+…
+a placeholder: fill it and `yield` to carry on
+  elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
+thena spine> :where
+focus
+  let ? goal : value`0 value` in
+path
+  root ▸ zeroIsValue
+context
+  zeroIsValue : value`0 value`
+type
+  value`0 value`
+```
+
+`:where` says `root ▸ zeroIsValue` — the declaration the file is writing, not a
+scratch goal. Fill the hole, type `yield`, and the import carries on and finishes,
+declaring everything the module wrote, and any further modules its closure still had
+to load.
+
+**Nothing of the module is declared until the import finishes**, so there is nothing
+half-installed while you hold the wheel.
+
+**`:abandon` gives up the declaration you are standing in, and the module carries on
+without it.** It is the declaration failing, which is what a module imported at the
+prompt does with any declaration that will not go through: that one is lost, every
+declaration that names it is lost with it, and the rest of the file goes in. It answers
+`gave up zeroIsValue — the rest of … carries on`, and the module's own line then names
+it among what did not go in. **There is no word for giving the whole import up.**
+
+**It takes with it anything you declared at the prompt meanwhile, and says so**: what
+you proved during the suspension stands under the elaboration that is going, and
+leaving it would leave a reference dangling.
+
+**What is in scope while you hold the wheel is what the elaboration has** — the
+module's imports and what it has declared so far, not the rest of your session. You
+are standing inside that file's elaboration.
+
+While a load is standing still, **a second `import` is refused**, and so is
+**`:theorem`** — which brings us to the next part.
+
+### Park the import, prove the lemma, pick it back up
+
+A placeholder usually wants a lemma, and a lemma is a theorem — which you cannot
+start while the import is standing, because entering a proof empties the machine's
+program and would throw the suspended elaboration away. The refusal says what to do:
+
+```
+thena spine> :theorem helper : value`0 value`
+a rule has handed control over — yield to hand it back before starting a proof, or :suspend to park the import of examples.demo.pending.Demo07Holes
+```
+
+So park it. **It goes into `:proofs`, under the name you imported it by**, beside any
+parked proofs you have:
+
+```
+thena spine> :suspend
+parked the import of examples.demo.pending.Demo07Holes
+  it is in :proofs — :resume examples.demo.pending.Demo07Holes to carry on with it
+thena spine> :proofs
+  examples.demo.pending.Demo07Holes : an import, standing in a yield
+```
+
+Now the theorem is allowed, and **it is proved in the module's scope**, because
+parking leaves the module's imports and rule bases in force:
+
+```
+thena spine> :theorem helper : value`0 value`
+proving helper : value`0 value`
+thena spine> try-core core`V-num zero NV-zero`
+thena spine> solve
+thena spine> qed
+helper : value`0 value`   ∎
+thena spine> :resume examples.demo.pending.Demo07Holes
+picked the import of examples.demo.pending.Demo07Holes back up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
+thena spine> try-core core`helper`
+a placeholder: fill it and `yield` to carry on
+(yield to hand control back)
+thena spine> solve
+a placeholder: fill it and `yield` to carry on
+(yield to hand control back)
+thena spine> yield
+module examples.demo.pending.Demo07Holes
+  declared zeroIsValue
+```
+
+**The yield's message reprints after every line that steps the machine**, which is why
+it appears twice above. It is cosmetic, and `:where` and `:show` do not provoke it.
+
+Four things are worth knowing about that sequence.
+
+**`:suspend`, `:resume`, `:proofs` and `:abandon` do not care which kind of thing they
+are acting on.** A proof has a statement and `qed` certifies it; a parked import has
+the name you imported it by and nothing certifies it. There is no second word for
+parking an import, and no second list.
+
+**Nothing parks or unparks itself.** `qed` does not hand the import back the wheel —
+you pick it up when you want it.
+
+**A second `import` is refused while one is parked**, for the same reason the lemma is
+proved in the module's scope: there is one set of rule bases and one scope in force,
+and the parked import expects to find its own when you pick it up. To get past a
+parked import, `:resume` it and then either carry it to its end or `:abandon` the
+declaration it stopped in — either way it finishes and the pool is yours again.
+
+**`yield` while it is parked says *nothing has yielded*.** Yielding is about the
+program in front of you, and parking moved that program into the parked import. For
+the same reason, you cannot `yield` out of the lemma: it is a different program.
+
 ### `:replay` runs a script as though you had typed it
 
 `:replay ‹path›` submits a script's lines one at a time, exactly as if you had
@@ -2066,10 +2342,14 @@ language and elaborated on load.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
+| `rename "‹a›"` | give the binding you are standing on a word, when it has lost its own |
 | `` try-core core`term` `` | propose a term for the focused hole |
+| `try-in-scope` | the same, with the term found for you from what is in scope |
+| `fit-in-scope` | the same again, for a hypothesis that has to be applied to something |
 | `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |
+| `next` | move to the goal to work on next, worked out from the development |
 | `` assume "‹x›" core`‹S›` `` / `` claim "‹x›" core`‹S›` `` | add a hypothesis / a hole above the focus |
 | `` assume core`‹S›` `` / `` claim core`‹S›` `` | the same, asking for the name |
 | `` unify core`‹t›` core`‹u›` `` | solve by unification |
@@ -2082,7 +2362,8 @@ language and elaborated on load.
 | `cross type` / `cross val` | move into a term |
 | `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` `claimed` `actual` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
-| `prove` | let the rule engine choose and run a rule |
+| `step` | let the rule engine choose and run a rule |
+| `step ‹n›` | do that n times |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |
@@ -2110,7 +2391,7 @@ language and elaborated on load.
 | `:choices` | open choice points |
 | `:step on` / `:step` / `:step off` / `:run` | single-step the machine |
 | `:theorem ‹x› : ‹T›` | start a proof |
-| `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management |
+| `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management — a proof, or a parked import |
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
 | `:trust` | the trust level, and what this proof rests on |

@@ -13,7 +13,7 @@ rule base standard where
 --
 -- **A function and not a rule**, and that is not a preference: it has no head,
 -- and a headless rule matches everywhere, so `:matches` would offer it at every
--- focus and `prove` would run it. That is phase 49c's `enter-binders` lesson —
+-- focus and `step` would run it. That is phase 49c's `enter-binders` lesson —
 -- a helper wants a head that is TRUE, and there is no true head here because it
 -- reads nothing about the development at all.
 fresh-universe : Core
@@ -22,25 +22,159 @@ fresh-universe = do
   u = universe-at l
   return u
 
+-- `try-core` WITHOUT BEING TOLD WHICH TERM, and it is the first rule in this
+-- base that can close a goal without being handed the answer. `in-scope`
+-- reports the entries at the focus as terms, `any-of` offers them one at a time,
+-- and a candidate whose type does not fit fails the guess and brings the search
+-- back for the next one.
+--
+-- **Nullary, so `step` offers it.** Until this rule every nullary rule here was
+-- a hole-life operation — attack, abandon, intro, solve, regret — so a bare
+-- `step` could move a proof around and never finish one.
+--
+-- **IT IS ABOVE `attack` ON PURPOSE — his instruction, 2026-11-23.** `step`
+-- offers every matching rule in base order, and `attack` matches at every hole
+-- and never fails. With `attack` first, a bare `step` at a goal that a
+-- hypothesis closes outright went attack, solve, regret, attack — for ever —
+-- while this rule sat untried at every choice point that cycle made. Trying to
+-- close the goal is the cheap guess and it fails at once when nothing fits, so
+-- it goes first.
+try-in-scope : ()
+rule try-in-scope at ? _ : _ :-
+  do hs = in-scope
+     ; h = any-of hs
+     ; prim-try h
+
+-- THE SAME WALK FOR A HYPOTHESIS THAT HAS TO BE APPLIED TO SOMETHING — his
+-- instruction, 2026-11-23 — and it is BELOW `try-in-scope` because the bare
+-- candidate is the cheaper guess and this one opens a hole per argument.
+--
+-- `fit-in-scope` rather than `apply-in-scope`, because the base already draws
+-- that distinction and this is the second of the two: `apply-core` saturates
+-- the spine in one step from the telescope, `fit-core` searches the arity
+-- minimal-arity-first. `apply-next` claims one argument above the focus and
+-- fails outright when the candidate's type is not a function, so a hypothesis
+-- that cannot be applied at all costs one step.
+--
+-- **It starts at one argument so that it does not repeat the rule above**:
+-- `fit-core`'s own first clause is the bare spine, which is exactly the guess
+-- `try-in-scope` has already made by the time this runs.
+fit-in-scope : ()
+rule fit-in-scope at ? _ : _ :-
+  do hs = in-scope
+     ; h = any-of hs
+     ; n0 = next-argument-name h
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
+     ; f = apply-next h n
+     ; call fit-core f
+
+-- **ABOVE `attack`, for the reason `try-in-scope` is** — his instruction of
+-- 2026-11-23, applied again in MS12 phase 357. `attack` matches at every hole
+-- and never fails, so with `attack` first a bare `step` at a ∀ goal attacked
+-- for ever and never introduced: the introductions ask about a hole now, which
+-- is the same list `attack` is in. The universal tactic goes below the one with
+-- a shape test.
+intro : ()
+rule intro at ? _ : _ :- when goal-type-is-pi do prim-lambda
+
+rule intro at ? _ : _ :- when goal-type-is-let do prim-let
+
+-- `intro` SAYING WHAT THE BINDING IS CALLED — 2026-11-20. Without it the only
+-- names a proof's own arguments could have were the ones the statement wrote,
+-- and a statement like `T -> T -> T` writes none, so they had to be named for
+-- the author. `DECISIONS.md`, *An argument the statement did not name gets a
+-- real name, and `intro` can say what it is*, is the whole decision.
+-- `prim-lambda` and `prim-let` have taken an optional name since MS4 phase 41f;
+-- nothing in the base passed one.
+--
+-- One name at two arities, which is the ordinary shape here: a call is matched
+-- by name AND arity, so `intro` and `intro "a"` are two rules and neither
+-- shadows the other.
+--
+-- THE ARGUMENT IS AN `Ident` AND NOT A `Name` — his ruling of 2026-11-25. An
+-- `Ident` is a word and, when there is one, the token a binder was opened at;
+-- `intro` adopts that token instead of minting a second one. `intro "a"` is
+-- unchanged, because a written literal stands at that type and means *this
+-- word, no token*. A rule holding a `Name` writes `name-ident` to say it means
+-- that word's binder.
+intro : Ident -> ()
+rule intro n at ? _ : _ :- when goal-type-is-pi do prim-lambda n
+
+rule intro n at ? _ : _ :- when goal-type-is-let do prim-let n
+
+-- A RULE THAT READS ITS OWN GOAL, DECOMPOSES IT AND INDUCTS ON THE PARAMETER —
+-- the acceptance test for `~9j34x`, and what he described on 2026-11-19: *"I
+-- match that the goal's type is a universal. I then decompose that type a
+-- little bit … and then I call another rule that is search-ready for induction
+-- on the first argument."*
+--
+-- **It is the first rule in this base that takes its own goal apart.** Until
+-- the core pattern landed, a nullary rule could ask the five yes-or-no
+-- questions about its goal and learn nothing further: every destructor in the
+-- vocabulary answers a `Surface`, and `goal` hands back a `Core`. So the head
+-- here is the whole point — `${x}` is the binder the statement wrote, `${T}`
+-- its domain and `${E}` its body, and none of the three could be named before.
+--
+-- **The subject comes from the goal and not from the context.** `intro x`
+-- adopts the token `${x}` carries, so the binder is opened at that very
+-- variable and `ident-term x` is the term that mentions it. Reaching it by
+-- walking `in-scope` instead works — the innermost entry is the one just
+-- introduced — but it finds the parameter rather than naming it, and it opens a
+-- choice point per hypothesis for a subject the head already knew.
+--
+-- **`${T}` and `${E}` are bound and unused, deliberately.** The pattern says
+-- the goal is a universal of one parameter and the binder is what this rule
+-- acts on; writing `_` at the other two would say the same thing and leave a
+-- reader of the base unable to see what a core pattern binds.
+--
+-- **ABOVE `attack` AND BELOW `intro`, which is his 2026-11-23 arrangement
+-- applied again.** The universal tactic goes below the one with a shape test,
+-- or a bare `step` reaches this only by backtracking past everything `attack`
+-- opens. Below `intro` because introducing is the strictly less committal move
+-- and it is what this rule's own first instruction does: once `intro` has run,
+-- the goal is no longer a universal and this clause no longer matches, so a
+-- search tries the cheap move first and reaches the case split on the way back.
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+
+-- ATTACK LEAVES THE CURSOR ON THE HOLE IT OPENED — his ruling of 2026-11-26.
+-- The introductions are positional: each acts on the hole the cursor stands on,
+-- so the move belongs here, where it can be read, and not inside `prim-attack`,
+-- which is table 2.7's replacement and nothing else. `back` is the way out to
+-- the guess, which is what `solve` and `regret` act on.
 attack : ()
-rule attack :- when focus-is-hole do prim-attack
+rule attack at ? _ : _ :- do prim-attack ; into
 
 try-core : Core -> ()
-rule try-core t :- when focus-is-hole do prim-try t
+rule try-core t at ? _ : _ :- do prim-try t
 
 abandon : ()
-rule abandon :- when focus-is-hole do prim-abandon
+rule abandon at ? _ : _ :- do prim-abandon
 
-intro : ()
-rule intro :- when focus-is-guess goal-type-is-pi do prim-lambda
-
-rule intro :- when focus-is-guess goal-type-is-let do prim-let
+-- RENAMING THE BINDER AT THE FOCUS — 2026-11-20, his ruling *THERE IS ONE
+-- NAME*, part four. A word written twice kills the outer binder: nothing
+-- reaches it, it prints marked, and so does every reference to it. **This is
+-- the way back** — walk up to that binder and give it a word, which changes the
+-- development and therefore the term. `DECISIONS.md`, *A word that reaches
+-- nothing is marked*, says what it repairs.
+--
+-- The focus is written `at _` because a word belongs to a binder and all five
+-- components are one; a constraint and a position inside a core term are not,
+-- and `prim-rename` refuses there for the same reason the head does. `_` and
+-- not a bound word: the op is handed `n`, the word to give, and asks the focus
+-- itself for the binder to give it to.
+rename : Name -> ()
+rule rename n at _ :- do prim-rename n
 
 solve : ()
-rule solve :- when focus-is-guess do prim-solve
+rule solve at ? _ ≐ _ : _ :- do prim-solve
 
 regret : ()
-rule regret :- when focus-is-guess do prim-regret
+rule regret at ? _ ≐ _ : _ :- do prim-regret
 
 -- THE TWO ELIMINATIONS, AND THEY ARE TWO RULES BECAUSE THEY ARE TWO
 -- CONSTRUCTIONS (MS9 phase 211).
@@ -68,18 +202,56 @@ rule regret :- when focus-is-guess do prim-regret
 -- design principle forbids: a rule says only what it is about, and these two
 -- are about two motives.
 eliminate-core : Core -> ()
-rule eliminate-core t :- when focus-is-hole do prim-eliminate-fixed t
+rule eliminate-core t at ? _ : _ :- do prim-eliminate-fixed t
 
 eliminate-generalising-core : Core -> ()
-rule eliminate-generalising-core t :- when focus-is-hole do prim-eliminate t
+rule eliminate-generalising-core t at ? _ : _ :- do prim-eliminate t
 
-prove : ()
-rule prove :- when focus-is-hole do prim-prove
+-- step — ONE move, chosen by the rules. It was called `prove` until MS12 phase
+-- 346, and the rename is his: a rule that does exactly one step is not proving
+-- anything, and `prove` is reserved. **Nothing is shipped under the word
+-- `prove`**, so a base is free to define what proving means in its own
+-- development, and `search` is the word kept for running to a finish.
+--
+-- Two clauses because a hole and a guess are two places a move can be made, and
+-- the word for the second one is not `solve`: at a guess the rules decide again.
+step : ()
+rule step at ? _ : _ :- do prim-step
 
-rule prove :- when focus-is-guess do prim-prove
+rule step at ? _ ≐ _ : _ :- do prim-step
+
+-- step ‹n› — n moves, his instruction of 2026-11-24: *"let's ship a rule `step`
+-- with one more argument — a fuel, an integer. like `step 5` which does 5
+-- steps."*
+--
+-- **The arity picks the clause**, so a bare `step` is untouched — the same
+-- arrangement `claim` has had since MS5 phase 62b, where the one-argument form
+-- is a rule and the two-argument one an op.
+--
+-- **Two clauses, and they are disjoint.** `0` is a literal pattern and
+-- `number-is-positive` is its complement, so dispatch builds no choice point
+-- between them and a retry cannot walk the count downwards past nought. A
+-- negative count matches neither clause, which answers *no rule matches*.
+--
+-- **A move that fails fails the whole count**, and the backtracking is the
+-- engine's as it is everywhere else: `step 5` is five dispatches in a row, not
+-- five attempts to make progress. There is no brake here and this is not one —
+-- a rule that calls itself without a count still does not terminate.
+-- **Both clauses say `at _`** rather than going headless: a rule with no head
+-- matches everywhere, the core fragment included, which is why
+-- `fresh-universe` at the top of this file is a function. The count is about
+-- the chain, so the chain is what the head asks about, and `number-is-positive`
+-- rides beside it on the clause that recurses.
+step : Int -> ()
+rule step 0 at _ :- do
+
+rule step n at _ :- when (number-is-positive n)
+  do step
+     ; m = one-less n
+     ; call step m
 
 fill : Core -> ()
-rule fill t :- when focus-is-hole
+rule fill t at ? _ : _ :-
   do n = fresh-name "refined"
      ; x = define n t
      ; s = typeof x
@@ -88,12 +260,12 @@ rule fill t :- when focus-is-hole
      ; prim-try x
 
 unify-refine-core : Core -> ()
-rule unify-refine-core t :- when focus-is-hole
+rule unify-refine-core t at ? _ : _ :-
   do fill t
      ; solve
 
 apply-core : Core -> ()
-rule apply-core f :- when focus-is-hole
+rule apply-core f at ? _ : _ :-
   do s = prim-apply f
      ; unify-refine-core s
 
@@ -116,12 +288,14 @@ rule apply-core f :- when focus-is-hole
 -- for `spine-arguments`, which is this same recursion with a surface term
 -- saying how many arguments there are instead of the search finding out.
 fit-core : Core -> ()
-rule fit-core f :- when focus-is-hole
+rule fit-core f at ? _ : _ :-
   do fill f
      ; solve
 
-rule fit-core f :- when focus-is-hole
-  do n  = fresh-name "a"
+rule fit-core f at ? _ : _ :-
+  do n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n  = fresh-name n1
      ; f2 = apply-next f n
      ; call fit-core f2
 
@@ -142,7 +316,7 @@ rule fit-core f :- when focus-is-hole
 -- term — ms5/CLOSEOUT.md 1.
 --
 -- NO HEAD, and that is the honest answer rather than the tidy one. The tidy one
--- was focus-is-component, written first to keep these out of the core
+-- was a focus test, written first to keep these out of the core
 -- fragment's match list — and it is FALSE: the ops insert above the focus
 -- through Cursor.insertAbove, which works from inside a core term too, so
 -- claim "k" core`Nat` succeeds there. A head that refused what the op it wraps
@@ -152,7 +326,7 @@ rule fit-core f :- when focus-is-hole
 --
 -- So they are offered wherever there is a focus, the core fragment included.
 -- That costs a row in `:matches` and nothing else: `dispatch` runs no rule that
--- takes parameters, so `prove` cannot reach them.
+-- takes parameters, so `step` cannot reach them.
 -- --------------------------------------------------------------------------
 
 claim : Core -> ()
@@ -194,13 +368,24 @@ rule quantify ty :-
 -- prim-elaborate any more and there is no Haskell elaborator behind it; what
 -- follows is the whole of E⟦·⟧.
 
--- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+-- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case, and since MS12 phase 320 it is
+-- the application clause below with nothing written: EXPAND first, then walk
+-- the spine. A name whose leading arguments are implicit is a spine of the
+-- arguments nobody wrote — `vz : ∀ {n : Nat} -> V n` is used by writing `vz` —
+-- and spine-arguments' base case is the bare name, so when EXPAND inserts
+-- nothing this is FILL x ; SOLVE and nothing else.
+--
+-- Asking whether a name has implicit positions is NOT a head test: the table
+-- that records them sits beside the session and a head reads the focus and the
+-- operand, so the two cases cannot be two clauses. They do not have to be —
+-- the walk is the same either way.
 elaborate : Surface -> ()
-rule elaborate t :- when focus-is-hole (surface-is-name t)
-  do w = surface-name t
-     ; x = resolve-name w
-     ; fill x
-     ; solve
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
+  do h = here
+     ; e = expand-implicits t
+     ; w = surface-name t
+     ; f = resolve-name w
+     ; call spine-arguments h f e
 
 -- E⟦"ab"⟧, E⟦'c'⟧, E⟦3⟧, E⟦/[a-z]/⟧ — a literal is its own term (MS6 phases
 -- 97c and 100). Nothing has to be looked up, so the term is ready; apply-core
@@ -210,7 +395,7 @@ rule elaborate t :- when focus-is-hole (surface-is-name t)
 -- unifies Token ?T with the goal — which is where T comes from (his ruling,
 -- 2026-09-19). A T nothing determines stays an unsolved hole; nothing is
 -- defaulted.
-rule elaborate t :- when focus-is-hole (surface-is-literal t)
+rule elaborate t at ? _ : _ :- when (surface-is-literal t)
   do l = surface-literal t
      ; apply-core l
 
@@ -220,27 +405,27 @@ rule elaborate t :- when focus-is-hole (surface-is-literal t)
 -- application. A ${e} in the region is an ordinary surface term standing where
 -- its slot is, so it is elaborated there, at the constructor argument's type,
 -- and nothing here has to know it was written as a splice.
-rule elaborate t :- when focus-is-hole (surface-is-object t)
+rule elaborate t at ? _ : _ :- when (surface-is-object t)
   do a = object-term t
      ; call elaborate a
 
 -- E⟦Typeₙ⟧ — the level is written, so the term is too.
-rule elaborate t :- when focus-is-hole (surface-is-universe t)
+rule elaborate t at ? _ : _ :- when (surface-is-universe t)
   do u = surface-universe t
      ; fill u
      ; solve
 
 -- E⟦Type⟧ — typical ambiguity: the level is a fresh meta, unification decides.
-rule elaborate t :- when focus-is-hole (surface-is-universe-open t)
+rule elaborate t at ? _ : _ :- when (surface-is-universe-open t)
   do u = fresh-universe
      ; fill u
      ; solve
 
 -- E⟦_⟧ — "those elaborate just by not elaborating". The hole is already there.
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t) do
 
 -- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
-rule elaborate t :- when focus-is-hole (surface-is-hole t) do
+rule elaborate t at ? _ : _ :- when (surface-is-hole t) do
 
 -- --------------------------------------------------------------------------
 -- E⟦induction t of { p -> e ; … }⟧ — the splitting tree (MS9)
@@ -356,6 +541,24 @@ rule reverse-onto [x, ...xs] acc :-
      ; r = reverse-onto xs acc2
      ; return r
 
+-- EVERY ELEMENT OF A LIST, ONE AT A TIME, AS ALTERNATIVES.
+-- Each clause matches, so the call builds a choice point: the first answers the
+-- head, and a failure anywhere after the call comes back and takes the tail.
+-- This is Prolog's `member`, and it is what turns a list that an op /reports/
+-- into a search the machine runs.
+--
+-- **A rule and not a function, and that is the whole mechanism**: a function's
+-- matching clauses are cut to the first (`Thena.Rules.clauses`), so written as
+-- one it would answer the head of the list and never the rest.
+--
+-- It has no head because it reads nothing about the development — the same
+-- reason `reverse-onto` above has none.
+any-of : List a -> a
+rule any-of [x, ..._] :- do return x
+rule any-of [_, ...xs] :-
+  do r = any-of xs
+     ; return r
+
 -- A term applied to each of a list of terms, left to right — which is what a
 -- function of a telescope is used by. `apply-to` is the one application; this is
 -- the fold, and it is a rule rather than an op because nothing else is needed.
@@ -419,11 +622,9 @@ rule intro-arm-binders [] [] vs ds fs k :-
 rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
   do w = fresh-name "u"
-     ; g = here
-     ; k2 = prim-lambda w
-     ; goto k2
+     ; wi = name-ident w
+     ; k2 = prim-lambda wi
      ; v = resolve-name w
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -432,11 +633,9 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
   do sub = pattern-arguments p
      ; no-nesting sub
      ; w = pattern-head p
-     ; g = here
-     ; k2 = prim-lambda w
-     ; goto k2
+     ; wi = name-ident w
+     ; k2 = prim-lambda wi
      ; v = resolve-name w
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -498,21 +697,17 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypot
   do n0 = binder-name b
      ; n = name-or-stem n0 "ih"
      ; h = fresh-name n
-     ; g = here
-     ; k2 = prim-lambda h
-     ; goto k2
+     ; hi = name-ident h
+     ; k2 = prim-lambda hi
      ; v = resolve-name h
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
 rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-copy b)
   do n = binder-name b
-     ; g = here
-     ; k2 = prim-lambda n
-     ; goto k2
+     ; ni = name-ident n
+     ; k2 = prim-lambda ni
      ; v = resolve-name n
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -650,7 +845,6 @@ rule elaborate-arm t c sub bs fs (p, ob) :-
      ; prim-attack
      ; into
      ; k0 = here
-     ; back
      ; k1 = intro-arm-binders as bs [] [] fs k0
      ; goto k1
      ; arm-needs-body sub ob
@@ -935,7 +1129,6 @@ rule open-case mh (some sub) bs fs :-
      ; prim-attack
      ; into
      ; k0 = here
-     ; back
      ; k1 = intro-arm-binders ps bs [] [] fs k0
      ; goto k1
 
@@ -982,7 +1175,7 @@ rule without-hypotheses [c, ...cs] :-
 -- leave it. Which goal to show next is a separate question — focusing the next
 -- goal by itself — and is not answered by a tactic guessing.
 induction-core : Core -> ()
-rule induction-core t :- when focus-is-hole
+rule induction-core t at ? _ : _ :-
   do h = here
      ; r = prim-eliminate t
      ; tt = typeof t
@@ -993,7 +1186,7 @@ rule induction-core t :- when focus-is-hole
      ; goto h
 
 case-core : Core -> ()
-rule case-core t :- when focus-is-hole
+rule case-core t at ? _ : _ :-
   do h = here
      ; r = prim-case t
      ; tt = typeof t
@@ -1007,10 +1200,10 @@ rule case-core t :- when focus-is-hole
 -- clauses, and they are two only because the head language has no disjunction.
 -- The word is read inside, by `split-claim` and by `ihs-for`, which is where it
 -- means something.
-rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-arms t) (split-is-induction t)
+rule elaborate t at ? _ : _ :- when (surface-is-split t) (split-has-arms t) (split-is-induction t)
   do split-elaborate t
 
-rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-arms t) (split-is-cases t)
+rule elaborate t at ? _ : _ :- when (surface-is-split t) (split-has-arms t) (split-is-cases t)
   do split-elaborate t
 
 -- E⟦case t of { }⟧ and E⟦induction t of { }⟧ — A SPLIT WITH NO ARMS IS NOT A
@@ -1026,7 +1219,7 @@ rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-arms t) (
 -- inductive hypothesis to be attached to, so `induction` and `case` agree. A
 -- method that does NOT vanish finds no arm and the split is refused, which is
 -- coverage failing and is the right answer.
-rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-no-arms t)
+rule elaborate t at ? _ : _ :- when (surface-is-split t) (split-has-no-arms t)
   do split-elaborate t
 
 -- E⟦(elim D … t) ⃗a⟧ — an elimination applied to something more, which is how a
@@ -1036,7 +1229,7 @@ rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-no-arms t
 -- and it claims f : A -> B, an arrow, where an eliminator's type is a
 -- telescope. elim-spine folds the extra arguments into the eliminator's own
 -- spine, so what is elaborated is one name-headed application.
-rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
+rule elaborate t at ? _ : _ :- when (surface-is-app t) (app-head-is-elim t)
   do a = elim-spine t
      ; call elaborate a
 
@@ -1059,7 +1252,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
 -- before it re-reaches the argument that was wrong — which is why
 -- `refl String "y"` against `Eq String "x" "x"` said `A2 is not bound before A`
 -- instead of naming the mismatch.
-rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-app t) (app-head-is-name t)
   do h  = here
      ; e  = expand-implicits t
      ; hd = app-head e
@@ -1070,7 +1263,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
 -- E⟦e a⟧ — the binary rule, a spine folded right to left. CLAIM (A : Type);
 -- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
 -- E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE.
-rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-term t) (app-args-are-explicit t)
+rule elaborate t at ? _ : _ :- when (surface-is-app t) (app-head-is-term t) (app-args-are-explicit t)
   do h  = here
      ; dn = fresh-name "A"
      ; u1 = fresh-universe
@@ -1101,12 +1294,11 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-term t) (
 -- the term is its own counter. Attacking once per binder instead would nest the
 -- λs and put an extra let round each — a different proof term, which is why the
 -- run is emitted here rather than by peeling in this clause.
-rule elaborate t :- when focus-is-hole (surface-is-lambda t)
+rule elaborate t at ? _ : _ :- when (surface-is-lambda t)
   do h = here
      ; prim-attack
      ; into
      ; k = here
-     ; back
      ; body = call intro-binders t k
      ; goto body
      ; b = lambda-body t
@@ -1119,7 +1311,7 @@ rule elaborate t :- when focus-is-hole (surface-is-lambda t)
 -- outside the attack, where an earlier binder of the same group is not in
 -- scope. The domain is elaborated before the body — Brady's order, and not a
 -- preference: the other way round the body's FILL solves the domain hole.
-rule elaborate t :- when focus-is-hole (surface-is-forall t)
+rule elaborate t at ? _ : _ :- when (surface-is-forall t)
   do x  = forall-name t
      ; ty = forall-domain t
      ; tl = forall-tail t
@@ -1128,9 +1320,8 @@ rule elaborate t :- when focus-is-hole (surface-is-forall t)
      ; u  = fresh-universe
      ; d  = claim dn u
      ; prim-attack
-     ; quantify x d
      ; into
-     ; along
+     ; quantify x d
      ; c  = here
      ; goto d
      ; call elaborate ty
@@ -1141,7 +1332,7 @@ rule elaborate t :- when focus-is-hole (surface-is-forall t)
 -- E⟦A -> B⟧ — the application case's shape with `arrow` where that has
 -- `apply-to`. Not the ∀ case with an anonymous binder: an arrow's codomain
 -- cannot mention the domain, so there is nothing to put in Γ and no attack.
-rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+rule elaborate t at ? _ : _ :- when (surface-is-arrow t)
   do h  = here
      ; dn = fresh-name "A"
      ; u1 = fresh-universe
@@ -1165,7 +1356,14 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 --
 -- Two clauses, because the annotation is optional and the head language has no
 -- negation. With one, X is left for the value's own FILL to unify against.
-rule elaborate t :- when focus-is-hole (let-is-annotated t)
+-- **The annotated clause records the braces its annotation wrote** (MS12 phase
+-- 321): record-implicits is expand-implicits' other half, and without it the
+-- brace on a let's type was accepted and meant nothing, so
+-- `let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"` put the string in
+-- A's position. It goes after the define, because what it records is the local
+-- that define bound; the bare clause below has no annotation and so has nothing
+-- to record.
+rule elaborate t at ? _ : _ :- when (let-is-annotated t)
   do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
@@ -1181,10 +1379,11 @@ rule elaborate t :- when focus-is-hole (let-is-annotated t)
      ; goto h
      ; w  = let-name t
      ; define w v
+     ; record-implicits t
      ; b  = let-body t
      ; call elaborate b
 
-rule elaborate t :- when focus-is-hole (let-is-bare t)
+rule elaborate t at ? _ : _ :- when (let-is-bare t)
   do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
@@ -1202,7 +1401,7 @@ rule elaborate t :- when focus-is-hole (let-is-bare t)
 -- E⟦e : T⟧ — claim X : Type, elaborate T into it, unify X with the goal, then
 -- elaborate e at the same hole. An ascription does not build a term; it narrows
 -- the one the goal was already asking for, so there is no fill and no solve.
-rule elaborate t :- when focus-is-hole (surface-is-ascription t)
+rule elaborate t at ? _ : _ :- when (surface-is-ascription t)
   do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
@@ -1239,7 +1438,7 @@ rule elaborate t :- when focus-is-hole (surface-is-ascription t)
 --
 -- The claim is elaborated before the body so that a claimed type mentioning
 -- names the body also mentions is already in place when the body is checked.
-rule elaborate t :- when focus-is-hole (surface-is-trusted t)
+rule elaborate t at ? _ : _ :- when (surface-is-trusted t)
   do h  = here
      ; cn = fresh-name "C"
      ; u1 = fresh-universe
@@ -1266,13 +1465,13 @@ rule elaborate t :- when focus-is-hole (surface-is-trusted t)
 -- and constructor, so `elim Nat (…) P (…) (…) n` and `Nat.elim (…) P … n` are
 -- the same term and this clause is the rewriting of one into the other. There
 -- is nothing here about eliminations that is not about applications.
-rule elaborate t :- when focus-is-hole (surface-is-elim t)
+rule elaborate t at ? _ : _ :- when (surface-is-elim t)
   do a = elim-spine t
      ; call elaborate a
 -- E⟦do { … }⟧ = play the block. It leaves the focus wherever the block left
 -- it, which is the one way it differs from every other clause: the block does
 -- what the user wrote, and repairing it is theirs.
-rule elaborate t :- when focus-is-hole (surface-is-do t) do play t
+rule elaborate t at ? _ : _ :- when (surface-is-do t) do play t
 
 -- A module's own top-level do block, played where it stands among the
 -- declarations (MS6 phase 104b). The driver calls this rule rather than
@@ -1299,16 +1498,18 @@ rule run-block t :- do play t
 -- only components in the chain — which stopped being true the moment a written
 -- type needed a hole of its own inside them.
 intro-binders : Surface -> Core -> Core
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; return k2
 
 -- A written type on a binder is a CHECK, not a declaration. The binder's type is
@@ -1317,65 +1518,72 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-ba
 -- binders already introduced, and then unified with the type the binder actually
 -- got. So `\ A (a : A) -> a` works, a wrong annotation fails at the binder it was
 -- written on, and where the goal's domain is still open the annotation solves it.
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-annotated t)
-  do g  = here
-     ; x  = lambda-name t
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-more t) (lambda-is-annotated t)
+  do x  = lambda-name t
      ; ty = lambda-annot-type t
      ; dn = fresh-name "A"
      ; u  = fresh-universe
-     ; goto k
+     ; g  = here
      ; d  = claim dn u
      ; goto d
      ; call elaborate ty
      ; goto g
-     ; k2 = prim-lambda x
-     ; goto k2
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; v  = resolve-name x
      ; s  = typeof v
      ; unify d s
-     ; goto g
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-annotated t)
-  do g  = here
-     ; x  = lambda-name t
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-one t) (lambda-is-annotated t)
+  do x  = lambda-name t
      ; ty = lambda-annot-type t
      ; dn = fresh-name "A"
      ; u  = fresh-universe
-     ; goto k
+     ; g  = here
      ; d  = claim dn u
      ; goto d
      ; call elaborate ty
      ; goto g
-     ; k2 = prim-lambda x
-     ; goto k2
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; v  = resolve-name x
      ; s  = typeof v
      ; unify d s
-     ; goto g
      ; return k2
 
 -- The walk itself, and it is a recursion over the surface spine: take the first
 -- argument, claim a hole for it, elaborate into that hole, and call on what is
--- left. The term is its own counter, exactly as the λ group is at
--- intro-binders — which is what lets a rule apply a head to any number of
--- arguments without ever holding a list (ms4/CLOSEOUT.md 28).
+-- left. The term is its own counter, exactly as the λ
+-- group is at intro-binders — which is what lets a rule apply a head to any
+-- number of arguments without ever holding a list (ms4/CLOSEOUT.md 28).
 --
 -- **goto h before each claim.** Every claim goes directly above the focus, so
 -- claiming from the one fixed place is what puts the domains in telescope order
 -- and lets a later domain mention an earlier hole.
 --
--- focus-is-component is there for enter-binders' reason (phase 49c): a head of
+-- **THE ORDER IS THE ARGUMENTS FIRST AND THE FILL LAST, AND THAT IS NOT
+-- BRADY'S PRINTED ORDER** — his is CLAIM, FILL, ELAB ARG, SOLVE (`IDRIS.md`
+-- §4). Measured at MS12 phase 320: his order cannot be run here, because the
+-- head's telescope is only as deep as the arguments already elaborated make
+-- it. A spine whose later domain appears only once an earlier argument is
+-- known — a head whose result type is a variable that an earlier argument
+-- instantiates — refuses at the claim with `that head does not take that many
+-- arguments`, and the prelude has such a spine.
+--
+-- `at _` is there for enter-binders' reason (phase 49c): a head of
 -- argument tests alone is true of every state, so the clause would be offered
--- everywhere. It is a test that is TRUE here, not one chosen to tidy the match
+-- everywhere. It is a focus that is TRUE here, not one chosen to tidy the match
 -- list — the focus is the hole on the way in and the argument just elaborated
 -- on the way round.
 spine-arguments : Core -> Core -> Surface -> ()
-rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
+rule spine-arguments h f t at _ :- when (surface-is-app t)
   do goto h
-     ; n  = fresh-name "a"
+     ; n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n  = fresh-name n1
      ; f2 = apply-next f n
      ; goto-named n
      ; a  = app-first-argument t
@@ -1385,10 +1593,12 @@ rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
 
 -- The base case: the arguments are gone and what is left is the head. Only now
 -- is the spine filled in — the arguments are elaborated BEFORE the FILL,
--- against Brady's printed order, because unifying the spine's type with the
--- goal solves the argument holes and a solved hole is a definition, so a goto
--- afterwards would find nothing.
-rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
+-- against Brady's printed order, because the head's telescope is only as deep
+-- as the arguments already elaborated make it: with the FILL first, a spine
+-- whose later domains appear only once an earlier argument is known refuses at
+-- the claim with `that head does not take that many arguments`, measured at
+-- MS12 phase 320 over the prelude.
+rule spine-arguments h f t at _ :- when (surface-is-name t)
   do goto h
      ; fill f
      ; solve

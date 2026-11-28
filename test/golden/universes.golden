@@ -26,8 +26,6 @@ thena spine> :theorem probe : ∀ (b : Box1 Nat) -> Nat
 proving probe : Box1 Nat -> Nat
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> eliminate-core core`b`
 subgoals: box1Method
 thena spine> :abandon
@@ -37,9 +35,9 @@ declared N
 thena spine> open N
 opened N
 thena spine> :show N
-data N {ℓ₅₁₆} : Type (ℓ₅₁₆) where
-  { z : N {ℓ₅₁₆}
-  ; s : N {ℓ₅₁₆} -> N {ℓ₅₁₆} }
+data N {ℓ₅₁₅} : Type (ℓ₅₁₅) where
+  { z : N {ℓ₅₁₅}
+  ; s : N {ℓ₅₁₅} -> N {ℓ₅₁₅} }
 thena spine> :infer core`s {0}`
 s {0} : N {0} -> N {0}
 thena spine> :infer core`s {1} (z {1})`

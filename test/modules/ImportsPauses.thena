@@ -1,0 +1,8 @@
+module test.modules.ImportsPauses where
+
+import test.modules.Pauses
+
+-- Reaches `picked` through the import, so the suspension has to finish before
+-- this module can elaborate at all.
+again : Two
+again = picked

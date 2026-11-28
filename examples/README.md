@@ -23,6 +23,14 @@ to the file.
 | `Stlc10PreservationAnyContext.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `String.append` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
 | `Stlc09Printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
 
+## The demo set — `demo/`, its own set
+
+**`examples/demo/` is loaded in a FRESH session** too, and for the same reason: it
+declares its own `Ty`. TAPL's arithmetic and boolean expressions carried from a grammar to
+progress, in files short enough to read off a projector, plus a tactic script.
+`examples/demo/README.md` is the account, and `DEMO.md` beside it is a running order for
+presenting the system in an hour.
+
 ## System F-sub — `poplmark/`, its own set
 
 **`examples/poplmark/` is loaded in a FRESH session**, not with the series above: it
@@ -58,6 +66,7 @@ be imported nor state what it imports; that is why none of them does now.
 | `DeterminacyPatterns.thena` | The same theorem, with **every one of its lemmas** by dependent pattern matching — no `elim` and no no-confusion anywhere. Its header says why a recursion across a generalising split is written exactly like any other one, and nothing in it binds an induction hypothesis. Read it beside `DeterminacySurface.thena` |
 | `Tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
 | `DependentIndex.thena.script`, `Products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
+| `SearchReadyInduction.thena.script` | **A rule that reads its own goal.** `by-induction` in the shipped base is handed nothing: its head matches that the goal is a universal, names the parts, introduces the binder and inducts on that parameter. Read it beside `SplitAtAHole.thena.script`, which makes the same split by hand and names the scrutinee |
 | `ChoicePoints.thena.rules` | What a choice point resumes into |
 | `Trying.thena` | A scratch module, with a `Bool` and two commented-out attempts |
 

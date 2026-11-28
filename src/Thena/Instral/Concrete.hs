@@ -35,12 +35,15 @@ module Thena.Instral.Concrete
   , RawSignature (..)
   , RawTy (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawPattern (..)
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawTest (..)
   ) where
+
+import Thena.Syntax.Lexer (Pos)
 
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
@@ -56,7 +59,42 @@ module Thena.Instral.Concrete
 -- matching on the focused term and on the goal is coming, and it will attach to
 -- the head, left of @:-@ or right of it. @when@ stays underneath whatever
 -- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [RawPattern] [RawTest] [RawInstr]
+-- **The 'Thena.Syntax.Lexer.Pos' is where the clause begins** (MS12 phase 342) —
+-- the @rule@ keyword's own line and column, so a reader is handed the start of
+-- the clause and not of its name.
+-- **AND WHERE EACH OF ITS WRITTEN STATEMENTS BEGINS** (MS12 phase 349,
+-- @~8w6qw@) — one position per element of the body above, in the same order,
+-- and the one place in this file where a position is kept beside a list rather
+-- than inside what it is about. 'RawInstr' says why it is not inside: a @do@
+-- block in a surface term is the same tree read out of text that is not a file,
+-- and two readings of one program must stay one tree.
+--
+-- **His ask of 2026-11-24** is that a fault in a rule file name a place a
+-- terminal can open; without this, a fault inside a body could say only which
+-- statement of the rule it was — a number that reads like a line and is not
+-- one. 'Thena.Instral.Ops.ruleWrittenAt' is where the list ends up, and
+-- 'Thena.Rules.faultIn' reads it.
+data RawRule =
+  RawRule Pos String [RawPattern] (Maybe RawComponentP) [RawTest] [RawInstr] [Pos]
+  deriving (Eq, Show)
+
+-- | The focus as written, after @at@ in a rule head (MS12 phase 358, @~9j34x@).
+--
+-- **Five constructors, one per development component**, in the notation
+-- @spec\/machine.md@ §3.2 prints them in. **Unresolved**: every position is a
+-- 'RawPattern', so a @core\`…\`@ region at a type position is still raw text
+-- here and 'Thena.Rules.resolveComponentP' is what reads it.
+--
+-- **The guess form carries its @≐@ position**, which resolution then refuses
+-- unless it is @_@: the grammar accepts a pattern there so that writing one
+-- gets a refusal naming the form rather than a parse error naming a token.
+data RawComponentP
+  = RawCPAny     RawPattern
+  | RawCPAssume   RawPattern RawPattern
+  | RawCPDefine   RawPattern RawPattern RawPattern
+  | RawCPClaim    RawPattern RawPattern
+  | RawCPGuess    RawPattern RawPattern RawPattern
+  | RawCPQuantify RawPattern RawPattern
   deriving (Eq, Show)
 
 -- | A written parameter (MS5 phase 82) — @x@, @_@, @[a, ...rest]@, @(x, y)@,
@@ -260,7 +298,23 @@ data RawOpenSpec
 -- answers with an ordinary 'Thena.Instral.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
-data RawFunction = RawFunction String [RawPattern] RawBody
+-- **The 'Thena.Syntax.Lexer.Pos' is the name's**, exactly as 'RawRule'\'s is the
+-- @rule@ keyword's: where the clause begins.
+--
+-- **It was the @=@'s until MS12 phase 344** (@~5n7tz@), because the grammar read
+-- an identifier through Happy's @$$@ — the token's text without its position — so
+-- the @=@ was the nearest token on the production that carried one. Phase 342
+-- took that for harmless on the grounds that a function is written on one line,
+-- which is true of @rules\/standard.thena.rules@ and not of the language: @f y@
+-- on one line and @= concat y "b"@ on the next loads, and the clause then
+-- recorded the second line. The grammar now reads @ident@ whole and takes its
+-- text with @wordOf@, so a two-line clause records the line it begins on.
+-- **AND WHERE EACH OF ITS BODY'S WRITTEN STATEMENTS BEGINS** (MS12 phase 349),
+-- exactly as 'RawRule' carries it. **The short form @f x = e@ has none**, the
+-- statement it compiles to being a binding the author did not write
+-- ('Thena.Rules.bodyInstrs'), so the clause's own position is what a fault in
+-- it is reported at.
+data RawFunction = RawFunction Pos String [RawPattern] RawBody [Pos]
   deriving (Eq, Show)
 
 -- | What stands right of an @=@ — in a function declaration and in a binding
@@ -305,7 +359,11 @@ data RawBody
 -- @signature f : Core -> Surface -> ()@ is the signature of @f@ at arity two,
 -- and it says nothing about an @f@ of another arity — which is a different
 -- callable ('Thena.Rules.clauses' dispatches on both).
-data RawSignature = RawSignature String RawTy
+-- **It carries where it was written** (MS12 phase 349, @~8w6qw@): the position
+-- of the signature's name. A fault about a type — @crush : Nonesuch@ — is
+-- about the signature and not about any clause, so a clause's origin cannot
+-- stand in for it.
+data RawSignature = RawSignature Pos String RawTy
   deriving (Eq, Show)
 
 -- | A written type. Resolved into 'Thena.Instral.Type.Ty' by "Thena.Rules".
@@ -337,6 +395,16 @@ data RawTy
   deriving (Eq, Show)
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Instral.Ops.Instr''s two cases, written.
+--
+-- **WHERE A STATEMENT IS WRITTEN IS NOT HERE, AND THAT IS DELIBERATE** (MS12
+-- phase 349, @~8w6qw@). A rule file's statements carry their positions on the
+-- declaration that holds them — 'RawRule' and 'RawFunction' — for two reasons.
+-- This type is also the tree a @do@ block inside a /surface term/ parses to,
+-- and such a block is read on its own, so a position in it is an offset into
+-- the term's text and not a line of any file. And a position here would make
+-- two readings of one program two different trees, where the grammar's own
+-- parity tests assert they are one — @do { step }@ laid out and braced,
+-- and a block read through the rule grammar against the surface grammar.
 data RawInstr
   = RawBind RawPattern RawRhs
     -- ^ **The left is a PATTERN since MS5 phase 84** — stage d of
@@ -367,9 +435,9 @@ data RawOp = RawOp String [RawOperand]
 -- question, not the parser's (§2.5, the parser is shallow).
 --
 -- A head is a /run/ of tests with nothing between them, so a test that takes
--- operands is written in parentheses — @when focus-is-hole (surface-is-name t)@
+-- operands is written in parentheses — @when goal-type-is-pi (surface-is-name t)@
 -- — and a bare word is a test of no operands. Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would read as one test applied to
+-- @when goal-type-is-pi goal-type-is-let@ would read as one test applied to
 -- another word.
 data RawTest = RawTest String [RawOperand]
   deriving (Eq, Show)

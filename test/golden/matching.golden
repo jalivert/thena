@@ -1,36 +1,46 @@
 thena spine> :rules
 standard
-  attack
-  try-core ‹t›
-  abandon
-  intro
-  intro
-  solve
-  regret
-  eliminate-core ‹t›
-  eliminate-generalising-core ‹t›
-  prove
-  prove
-  fill ‹t›
-  unify-refine-core ‹t›
-  apply-core ‹f›
-  fit-core ‹f›
-  fit-core ‹f›
+  try-in-scope at ? _ : _
+  fit-in-scope at ? _ : _
+  intro at ? _ : _
+  intro at ? _ : _
+  intro ‹n› at ? _ : _
+  intro ‹n› at ? _ : _
+  by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}`
+  attack at ? _ : _
+  try-core ‹t› at ? _ : _
+  abandon at ? _ : _
+  rename ‹n› at _
+  solve at ? _ ≐ _ : _
+  regret at ? _ ≐ _ : _
+  eliminate-core ‹t› at ? _ : _
+  eliminate-generalising-core ‹t› at ? _ : _
+  step at ? _ : _
+  step at ? _ ≐ _ : _
+  step 0 at _
+  step ‹n› at _
+  fill ‹t› at ? _ : _
+  unify-refine-core ‹t› at ? _ : _
+  apply-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
   claim ‹ty›
   assume ‹ty›
   quantify ‹ty›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   no-nesting []
   ihs-for ‹t› ‹c›
   ihs-for ‹t› ‹c›
   reverse-onto [] ‹acc›
   reverse-onto [x, ...xs] ‹acc›
+  any-of [x, ..._]
+  any-of [_, ...xs]
   apply-all ‹f› []
   apply-all ‹f› [x, ...xs]
   instantiate-with ‹f› ‹vs›
@@ -96,507 +106,324 @@ standard
   with-hypotheses [c, ...cs]
   without-hypotheses []
   without-hypotheses [c, ...cs]
-  induction-core ‹t›
-  case-core ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  induction-core ‹t› at ? _ : _
+  case-core ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   run-block ‹t›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  spine-arguments ‹h› ‹f› ‹t›
-  spine-arguments ‹h› ‹f› ‹t›
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  spine-arguments ‹h› ‹f› ‹t› at _
+  spine-arguments ‹h› ‹f› ‹t› at _
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-fill ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-fit-core ‹f›
-fit-core ‹f›
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-induction-core ‹t›
-case-core ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-run-block ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
-solve
-regret
-prove
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> cross type
 thena core> :matches
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+run-block ‹t› : Surface -> ()
 thena core> back
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-fill ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-fit-core ‹f›
-fit-core ‹f›
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-induction-core ‹t›
-case-core ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-run-block ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
-intro
-solve
-regret
-prove
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> :where
 focus
   let ? id1 : A -> A in
@@ -607,117 +434,68 @@ context
 type
   A -> A
 thena spine> :matches
-attack
-try-core ‹t›
-abandon
-eliminate-core ‹t›
-eliminate-generalising-core ‹t›
-prove
-fill ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-fit-core ‹f›
-fit-core ‹f›
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-induction-core ‹t›
-case-core ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-elaborate ‹t›
-run-block ‹t›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
@@ -725,187 +503,139 @@ proving c : Type₀ -> Type₀
 thena spine> attack
 thena spine> intro
 thena spine> :matches
-intro
-solve
-regret
-prove
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
-stuck: that hole's type is neither a ∀ nor a let
+stuck: no clause of intro applies here
 thena spine> :abandon
 abandoned c
 thena spine> :theorem l : let x = Type₀ : Type₁ in x
 proving l : let x = Type₀ : Type₁ in x
 thena spine> attack
 thena spine> :matches
-intro
-solve
-regret
-prove
-claim ‹ty›
-assume ‹ty›
-quantify ‹ty›
-no-nesting []
-ihs-for ‹t› ‹c›
-ihs-for ‹t› ‹c›
-reverse-onto [] ‹acc›
-reverse-onto [x, ...xs] ‹acc›
-apply-all ‹f› []
-apply-all ‹f› [x, ...xs]
-instantiate-with ‹f› ‹vs›
-name-or-stem ‹n› ‹stem›
-name-or-stem ‹n› ‹stem›
-intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
-bind-friendlies [] ‹vs› ‹ds›
-bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
-bind-solved [] ‹k›
-bind-solved [(n, v), ...ds] ‹k›
-same-length [] []
-same-length [p, ...ps] [n, ...ns]
-arm-for ‹t› ‹c›
-arm-for ‹t› ‹c›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body ‹k› (some b)
-arm-needs-body ‹k› none
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
-vanished-case-takes-no-body none
-vanished-case-takes-no-body (some (p, none))
-case-must-vanish none
-case-must-vanish (some h)
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
-one-case ‹t› ‹c› none ‹bs› ‹fs›
-one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
-arm-must-be-for-this-datatype ‹a› ‹b›
-arms-are-for-this-datatype ‹t› ‹d›
-arms-are-for-this-datatype ‹t› ‹d›
-one-arm-per-constructor ‹a› ‹b›
-arm-not-repeated ‹w› ‹t›
-arm-not-repeated ‹w› ‹t›
-arms-are-distinct ‹t›
-arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹m›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
-split-over ‹t› ‹cs› (hs, m)
-split-claim ‹t› ‹x›
-split-claim ‹t› ‹x›
-split-elaborate ‹t›
-argument-patterns [] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-patterns [(b, oc), ...bs] ‹acc›
-argument-pattern ‹b›
-open-case ‹mh› none ‹bs› ‹fs›
-open-case ‹mh› (some sub) ‹bs› ‹fs›
-split-holes [] [] ‹m›
-split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
-split-holes-over ‹cs› (hs, m)
-with-hypotheses []
-with-hypotheses [c, ...cs]
-without-hypotheses []
-without-hypotheses [c, ...cs]
-run-block ‹t›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-intro-binders ‹t› ‹k›
-spine-arguments ‹h› ‹f› ‹t›
-spine-arguments ‹h› ‹f› ‹t›
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
 thena spine> :show
-▶ let ? l : let x = Type₀ : Type₁ in x ≐ (
+  let ? l : let x = Type₀ : Type₁ in x ≐ (
     let x = Type₀ : Type₁ in
-    let ? l1 : x in
+▶   let ? l1 : x in
     l1
   ) in
   l

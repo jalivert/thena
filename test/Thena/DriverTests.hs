@@ -16,6 +16,7 @@ import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
+  , MatchedRule (..)
   , Response (..)
   , Session
   , machineOf
@@ -42,8 +43,10 @@ import Thena.Repl (entriesOf, unclosedEntry)
 -- | The names in a 'Fitting' listing, for the tests below.
 
 import Thena.Instral.Ops (AnswerKind (..), partWords)
-import Thena.Instral.Infer (InstralTypeError (..), Site (..))
-import Thena.Rules (RuleError (..))
+import Thena.Instral.Infer (InstralTypeError (..), Site (..), inferProgram, reachingAll)
+import Thena.Files (loadStandardRules)
+import Thena.Instral.Type (Ty (..))
+import Thena.Rules (RuleError (..), allCallable, allSignatures, faultsIn)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
@@ -172,19 +175,19 @@ tests =
           -- refusals; what changed is who says so.
           testCase "cross must say which field" $
             snd (command withRules "cross")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cross"])
         , testCase "and it must be one of the two there are" $
             snd (command withRules "cross body")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cross"])
         , testCase "a positional descent needs a number" $
             snd (command withRules "param")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "param"])
         , testCase "and it has to be one" $
             snd (command withRules "param x")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "param"])
         , testCase "a plain descent takes no argument" $
             snd (command withRules "cod 2")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cod"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cod"])
         , testCase ":where answers with the cursor, not with text" $
             case snd (command withRules ":where") of
               Where _ -> pure ()
@@ -254,7 +257,7 @@ tests =
             -- gone is reported before anything runs rather than halting mid-way.
             snd (say [ natCommand, ":theorem t : Nat"
                      , "m = concat \"a\" \"b\"", "say m" ])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "m"]
+              @?= LineRefused (faultsIn Nothing [] [UnboundInRule (rootName "entry") 0 "m" TString])
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
@@ -271,7 +274,7 @@ tests =
               other -> assertFailure ("expected a type error, got " ++ show other)
         , testCase "and an unbound name in one is refused" $
             snd (say [":theorem t : Type\8320", "do { say nope }"])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "nope"]
+              @?= LineRefused (faultsIn Nothing [] [UnboundInRule (rootName "entry") 0 "nope" TString])
         , testCase "and the development is as it was" $
             devOf (fst (say [":theorem t : Type\8320", "do { attack ; prim-try 3 }"]))
               @?= devOf (fst (say [":theorem t : Type\8320"]))
@@ -361,6 +364,52 @@ tests =
               @?= Ran [] [] Completed
         ]
     , testGroup
+        "the stored rule types agree with inference"
+        -- **The hazard of a derived field, pinned** (MS12 phase 323).
+        -- 'Thena.Engine.ruleTypes' is worked out by 'Thena.Engine.setBases' and
+        -- read by `:matches` and 'Thena.View.matchesView', so a future write of
+        -- 'Thena.Engine.pool' that bypasses the setter would serve types for
+        -- bases that are no longer loaded — silently, and a golden would accept
+        -- it. These compare the stored table against inference run from
+        -- scratch over the bases the machine actually holds.
+        [ testCase "on a Haskell-built base" $
+            agrees (machineOf withRules)
+          -- **And on a base read from disc**, which is the path that matters:
+          -- @installReadBases@ is where the table is set for a real session,
+          -- and it also fills 'Thena.Engine.held'.
+        , testCase "on the shipped base, read from disc" $ do
+            (s', _) <- loadStandardRules newSession
+            agrees (machineOf s')
+        ]
+    , testGroup
+        "the match list is one row per rule"
+        -- **His ruling, 2026-11-19**: /"each rule-arity, in other words — each
+        -- rule, gets to be represented by one entry. So I could have @foo/2@
+        -- and @foo/4@ but never two @foo@s."/ The transcript goldens pin the
+        -- whole listing; these pin the property, which a golden cannot — an
+        -- accepted golden records duplicates as happily as it records none.
+        [ testCase "no name and arity is listed twice" $
+            let rows = matchedKeys (snd (command withRules ":matches"))
+             in (length rows, length (nub rows)) @?= (length rows, length rows)
+          -- @elaborate@ is the sharpest case in the shipped base: twenty-two
+          -- clauses, differing only in which surface node their head asks
+          -- about, and all twenty-two passed at a hole because a head test
+          -- about an argument nobody supplied does not exclude a rule
+          -- ('Thena.Rules.holds').
+        , testCase "elaborate is one row, not one per clause" $
+            length [ k | k@(n, _) <- matchedKeys (snd (command withRules ":matches"))
+                       , n == "elaborate" ]
+              @?= 1
+          -- **Every row carries a type**, declared or inferred — his, the same
+          -- day: /"There will always be one, because we do inference."/ A rule
+          -- whose types do not work out never loads, so a row without one would
+          -- mean the lookup key had drifted from inference's.
+        , testCase "every row carries a type" $
+            case snd (command withRules ":matches") of
+              Matched rows -> [ matchedName r | r <- rows, matchedType r == Nothing ] @?= []
+              other        -> assertFailure (show other)
+        ]
+    , testGroup
         "the second matching instruction"
         -- **MS5 phase 71, his §1.1.** Different input from ':matches' — a type,
         -- not the development — different relation, different consumer. No pair.
@@ -392,8 +441,11 @@ tests =
                 -- binder's term to the binders it is a function of (MS9 phase
                 -- 195).
                 [ nameDotted g | (g, _, _, _) <- rows ]
-                  @?= [ "apply-all", "instantiate-with", "intro-arm-binders"
-                      , "intro-binders", "fresh-universe"
+                -- @any-of@ answers an element of the list it is given
+                -- (MS12), so at @List Core@ it gives a @Core@ — a polymorphic
+                -- answer is listed here because it /can/ be one.
+                  @?= [ "any-of", "apply-all", "instantiate-with"
+                      , "intro-arm-binders", "intro-binders", "fresh-universe"
                       ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
@@ -561,7 +613,7 @@ tests =
             case ( snd (say [natCommand, "open Nat", ":infer succ zero"])
                  , snd (say [natCommand, "open Nat", ":infer core`succ zero`"])
                  ) of
-              (InferredSurface _ a, Inferred _ b) ->
+              (InferredSurface _ _ a, Inferred _ b) ->
                 case convert (globals (machineOf (fst (say [natCommand])))) [] 0 a b of
                   (Nothing, _, _)  -> pure ()
                   (Just why, _, _) -> assertFailure (show why)
@@ -598,12 +650,30 @@ tests =
               s' -> snd (command s' ":run") @?= Ran [] [] Completed
         , testCase ":show ‹datatype› is the declaration" $
             case snd (say [natCommand, ":show Nat"]) of
-              ShownData _ -> pure ()
+              ShownData _ _ -> pure ()
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, "open Nat", ":show succ"]) of
               ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+          -- **A trailing space is invisible in an editor and survives in a
+          -- saved script** (MS12 phase 311), so a line that silently does
+          -- nothing takes the lines below it out of scope with nothing on
+          -- screen to say why. @open@ dropped the leading spaces only; the
+          -- commands that take a name read it trimmed now, as @import@ and
+          -- @consult@ always have.
+        , testCase "a trailing space after open does not go into the name" $
+            case snd (say [natCommand, "open Nat ", ":show succ"]) of
+              ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
+              other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+        , testCase "nor one after :show" $
+            case snd (say [natCommand, "open Nat", ":show succ "]) of
+              ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
+              other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+        , testCase "nor one after :judgment" $
+            case snd (say [natCommand, ":judgment Nat "]) of
+              ShownRules _ -> pure ()
+              other       -> assertFailure ("expected ShownRules, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, "open Nat", ":core succ zero"]) of
               Rendered _ -> pure ()
@@ -754,6 +824,25 @@ reached :: (Session, Response) -> (Development, GlobalEnv)
 reached (s, _) = (development (machineOf s), globals (machineOf s))
 
 -- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
+-- | The stored table is what inference says, for the bases this machine holds.
+--
+-- **Over @pool ++ held@ and not over 'Thena.Engine.rules'**, which is what
+-- 'Thena.Engine.setBases' covers: a base a body pushed came out of @held@, so
+-- @rules@ can only ever draw from this set.
+agrees :: Machine -> Assertion
+agrees m =
+  ruleTypes m
+    @?= fst (inferProgram (allSignatures everything)
+                          (reachingAll (allCallable everything)))
+  where
+    everything = pool m ++ held m
+
+-- | The @:matches@ rows as the key they are grouped by.
+matchedKeys :: Response -> [(String, Int)]
+matchedKeys r = case r of
+  Matched rows -> [ (nameDotted (matchedName m), matchedArity m) | m <- rows ]
+  _            -> []
+
 fittingNames :: Response -> [String]
 fittingNames r = case r of
   Fitting _ _ fs -> [ nameDotted g | (g, _, _, _) <- fs ]

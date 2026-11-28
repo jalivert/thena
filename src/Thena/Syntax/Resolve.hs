@@ -9,7 +9,8 @@ module Thena.Syntax.Resolve
   , resolveData
   ) where
 
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Context
+  (Context, Entry (..), entryIdent, entryVar, writableAmong)
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
@@ -21,6 +22,7 @@ import Thena.Core.Term
   , rootName
   , Ident (..)
   , InScope
+  , anonymousIdent
   , Scope
   , Var
   , close
@@ -57,6 +59,7 @@ import Thena.Syntax.Concrete
   , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
+  , RawLevel (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
@@ -142,6 +145,10 @@ type Splices = [(String, Filling)]
 data Filling
   = FillTerm Core
   | FillName Ident
+  | FillLevel Level
+    -- ^ a level argument's position (MS12 phase 361, @~bkrvn@) — a
+    -- 'Thena.Instral.Type.TLevel', and it rides in whole: a level expression
+    -- has no parts a written term reaches into.
   deriving (Eq, Show)
 
 -- | A written name, or the one a splice supplies (MS5 phase 88).
@@ -156,7 +163,27 @@ nameOf sp i = case i of
     -- Cannot arise for the same reason the term case cannot: a name position
     -- parses to 'RawIdentSplice' and only a name can be asked for it.
     Just (FillTerm _)          -> Left (SpliceNotFilled x)
+    Just (FillLevel _)         -> Left (SpliceNotFilled x)
     Nothing                    -> Left (SpliceNotFilled x)
+
+-- | A written level argument, or the one a splice supplies (MS12 phase 361,
+-- @~bkrvn@).
+--
+-- **'nameOf' one position over**, and for the same reason: the level grammar
+-- admits a numeral and a splice, so this is the one place a level splice is
+-- read and every position taking level arguments — a global at them, an
+-- @elim@’s head — gets the same behaviour and the same error for an
+-- unfilled one.
+levelOf :: Splices -> RawLevel -> Either ResolveError Level
+levelOf sp l = case l of
+  RawLevelNat k     -> Right (levelOfNat k)
+  RawLevelSplice x  -> case lookup x sp of
+    Just (FillLevel lv) -> Right lv
+    -- Cannot arise: a level position parses to 'RawLevelSplice' and only a
+    -- level can be asked for it.
+    Just (FillTerm _)   -> Left (SpliceNotFilled x)
+    Just (FillName _)   -> Left (SpliceNotFilled x)
+    Nothing             -> Left (SpliceNotFilled x)
 
 -- | Resolve a raw tree as a core gr term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
@@ -310,11 +337,12 @@ core gr env gs sp ctx local n raw = case raw of
   -- spliced as it stands, and a binder above it weakens it, which is what
   -- @close@ does for every other term this function builds.
   RawSplice x -> case lookup x sp of
-    Just (FillTerm t) -> Right (t, n)
+    Just (FillTerm t)  -> Right (t, n)
     -- Cannot arise: a term position parses to 'RawSplice' and a name position
     -- to 'RawIdentSplice', so what fills one is decided before this runs.
-    Just (FillName _) -> Left (SpliceNotFilled x)
-    Nothing           -> Left (SpliceNotFilled x)
+    Just (FillName _)  -> Left (SpliceNotFilled x)
+    Just (FillLevel _) -> Left (SpliceNotFilled x)
+    Nothing            -> Left (SpliceNotFilled x)
 
   RawUniverse k -> Right (Universe (levelOfNat k), n)
 
@@ -333,8 +361,8 @@ core gr env gs sp ctx local n raw = case raw of
 
   -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
   -- definition has level parameters, and a λ-bound name has none to give.
-  RawAt ps i rls -> nameOf sp i >>= \s ->
-    let at g = plainAt g (map levelOfNat rls)
+  RawAt ps i rls -> nameOf sp i >>= \s -> traverse (levelOf sp) rls >>= \lvs ->
+    let at g = plainAt g lvs
      in if not (null ps) then at (GlobalName ps s) else case lookup s local of
           Just _  -> Left (LevelArgumentsOnALocal s)
           Nothing -> case lookupEntry s ctx of
@@ -351,7 +379,7 @@ core gr env gs sp ctx local n raw = case raw of
     (s', n1) <- core gr env gs sp ctx local n s
     (b', n2) <- core gr env gs sp ctx local n1 b
     let (v, n3) = fresh n2
-    Right (Pi (Ident "_") s' (close v b'), n3)
+    Right (Pi anonymousIdent s' (close v b'), n3)
 
   RawLam bs b -> binders gr env gs sp Lam ctx local n bs b
   RawPi bs b  -> binders gr env gs sp Pi ctx local n bs b
@@ -383,7 +411,7 @@ core gr env gs sp ctx local n raw = case raw of
     let d = nameDotted (GlobalName dps w)
     dn        <- datatypeNamed gr env gs sp ctx local dps w
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
-    let dls = map levelOfNat rls
+    dls       <- traverse (levelOf sp) rls
     (ps', n1) <- coreList gr env gs sp ctx local n ps
     (m', n2)  <- core gr env gs sp ctx local n1 m
     (ms', n3) <- coreList gr env gs sp ctx local n2 ms
@@ -683,24 +711,42 @@ telescope gr env gs ctx local n (RawBinder i ty : rest) = do
 prefix
   :: [Grammar] -> GlobalEnv -> Globals -> Local -> Int -> Raw
   -> Either ResolveError (Context, Local, Raw, Int)
-prefix gr env gs local n raw = case raw of
-  RawPi bs b -> do
-    (tel, local1, n1)        <- telescope gr env gs [] local n bs
-    (tel', local2, rest, n2) <- prefix gr env gs local1 n1 b
-    Right (tel ++ tel', local2, rest, n2)
+prefix gr env gs local n raw = walk [ Ident w | (w, _) <- local ] local n raw
+  where
+    walk taken lcl k r = case r of
+      RawPi bs b -> do
+        (tel, local1, n1)        <- telescope gr env gs [] lcl k bs
+        (tel', local2, rest, n2) <- walk (taken ++ map entryIdent tel) local1 n1 b
+        Right (tel ++ tel', local2, rest, n2)
 
-  -- An arrow's argument has no written name, and unlike the @Ident "_"@ that
-  -- 'core' puts on a non-dependent 'Pi' this one is visible: the generated
-  -- wrapper abstracts it, and @λ (_ : Nat) -> ‹succ _›@ is not something to
-  -- hand a student (§3.7 — the point of generating into the environment is that
-  -- it can be read). The printer freshens a repeat to @x1@.
-  RawArrow s b -> do
-    (s', n1) <- core gr env gs [] [] local n s
-    let (v, n2) = fresh n1
-    (tel, local', rest, n3) <- prefix gr env gs local n2 b
-    Right (Hypothesis v (Ident "x") s' : tel, local', rest, n3)
+      -- An arrow's argument has no written name, and unlike the @Ident "_"@
+      -- that 'core' puts on a non-dependent 'Pi' this one is visible: the
+      -- generated wrapper abstracts it, and @λ (_ : Nat) -> ‹succ _›@ is not
+      -- something to hand a student (§3.7 — the point of generating into the
+      -- environment is that it can be read).
+      --
+      -- **The word is minted FREE, and the printer no longer numbers a repeat
+      -- — his ruling of 2026-11-20**, /THERE IS ONE NAME/, part one, @~n4jhj@
+      -- phase one. @mk : Nat -> Nat -> Nat@ gave two arguments both called @x@
+      -- and the screen said @x@ and @x1@; here they /are/ @x@ and @x1@. The
+      -- words of this telescope reach a user through the method types of a
+      -- split, so a word nothing answers to is the same defect one remove away.
+      --
+      -- Against the written names in scope as well as the minted ones, which
+      -- is what @taken@ carries: a parameter the author called @x@ is a word a
+      -- constructor's nameless argument must not take.
+      RawArrow s b -> do
+        (s', n1) <- core gr env gs [] [] lcl k s
+        let (v, n2) = fresh n1
+            -- 'writableAmong' and not 'freshIdent': the word has to be one
+            -- the lexer reads back as well as one nothing has taken
+            -- (@~vndxj@). The stem is @x@, so nothing moves today.
+            i       = writableAmong taken (Ident "x")
+            e       = Hypothesis v i s'
+        (tel, local', rest, n3) <- walk (taken ++ [i]) lcl n2 b
+        Right (e : tel, local', rest, n3)
 
-  _ -> Right ([], local, raw, n)
+      _ -> Right ([], lcl, r, k)
 
 -- --------------------------------------------------------------------------
 -- Odds and ends

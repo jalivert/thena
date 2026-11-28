@@ -18,11 +18,13 @@ import Data.List (isInfixOf, isPrefixOf, nub, sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Session)
+import Thena.Engine (scope)
+import Thena.Driver (Leniency (..), Session)
 import Thena.Files (following, startingSession)
-import Thena.Driver (commandSummary, oneLine)
-import Thena.Instral.Commands (Command (..), commands)
-import Thena.Instral.Ops (Pattern (..), Rule (..), signatureOf)
+import Thena.Driver (commandSummary, oneLine, openableNamespaces)
+import Thena.Instral.Commands (Command (..), actWords, commands)
+import Thena.Standard (aRule)
+import Thena.Instral.Ops (Pattern (..), signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
@@ -30,11 +32,12 @@ import qualified Thena.Language.Earley as E
 import Thena.Core.Term (rootName)
 import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
-import Thena.View (sessionGrammars, sessionRules, statementOfferView)
-import Thena.View.Chart (offerAt)
+import Thena.View (machineOf, sessionGrammars, sessionRules, statementOfferView)
+import Thena.View.Chart (offerAt, spelling)
 import Thena.View.Chart
   ( BoundView (..)
   , OfferView (..)
+  , ProductionView (..)
   , RecoveryView (..)
   , StuckView (..)
   , SymbolView (..)
@@ -74,12 +77,22 @@ tests =
         , testCase "and the table and :help's list name the same commands" tableMatchesHelp
         , testCase "a statement line is untouched by any of it" statementUntouched
         ]
+    , testGroup "the bare-word acts (phase 312)"
+        [ testCase "a half-typed act completes, beside the ops it collides with" actPrefix
+        , testCase "and every act word is offered on an empty line" actsOffered
+        , testCase "open's argument is the namespaces that are in scope" namespacesOffered
+        , testCase "and a half-typed one narrows to it" namespacePrefix
+        , testCase "every namespace offered is one open accepts" noRowRefuses
+        , testCase "a namespace the offer does not list is still not stuck" dottedNotStuck
+        , testCase "every act word is a word the driver dispatches" actsDispatch
+        ]
     , testGroup "a tagged literal is an operand (phase 141)"
         [ testCase "a slot offers the tag, so a literal may be written there" tagOffered
         , testCase "and inside it the object grammar answers, not recovery" insideIsDirect
         , testCase "a finished term offers its closing fence, and a substitution" fenceOffered
         , testCase "the production-named form narrows to that production" namedProduction
         , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
+        , testCase "and a production's label says the tag, not the module path" labelIsTheTag
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
         , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
         , testCase "two languages may share a production's word, and the tag says which"
@@ -123,7 +136,7 @@ withLC :: IO Session
 withLC = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load examples/Stlc01Syntax.thena"
-  case following s1 r of
+  case following Strict s1 r of
     Just io -> do (s2, _, _) <- io; pure s2
     Nothing -> pure s1
 
@@ -203,7 +216,8 @@ nestedLiteral = do
   s <- withLC
   offeredStuck (offerIn s "elaborate surface`LC`") @?= Nothing
   let o = offeredOptions (offerIn s "elaborate surface`LC`")
-  ANonterminalSymbol "LC" `elem` o @?= True
+  if ANonterminalSymbol "LC" `elem` o then pure ()
+    else assertFailure ("the object language was not offered: " <> show o)
 
 -- | The @:@-commands whose argument is a term now offer one. **Which language is
 -- the dispatch arm's**: @:core@ reads a development-calculus term, @:infer@ a
@@ -356,7 +370,7 @@ narrows = do
 derived :: IO ()
 derived = do
   s <- fst <$> startingSession
-  let rs      = instralRules (sessionGrammars s) (sessionRules s)
+  let rs      = instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s)
       heads   = [ w | r <- rs, E.ruleHead r == statementHead
                     , E.Literal w : _ <- [E.ruleBody r] ]
       missing = [ w | (w, _) <- opWords, w `notElem` heads ]
@@ -470,12 +484,14 @@ nameAnywhere = do
 fixture :: [(String, Signature)] -> [String] -> RuleBase
 fixture sigs names =
   ruleBase "fixture" Nothing "" sigs []
-    [ Rule (rootName nm) [PWild] [] [] | nm <- names ]
+    [ aRule (rootName nm) [PWild] [] [] | nm <- names ]
 
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =
   offeredOptions
-    (offerAt (instralRules (sessionGrammars s) (sessionRules s ++ [b])) (E.StartAt statementHead)
+    (offerAt (spelling (sessionGrammars s) (scope (machineOf s)))
+       (instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s ++ [b]))
+       (E.StartAt statementHead)
        [WrittenText before] [])
 
 listSlot :: IO ()
@@ -506,12 +522,17 @@ pairSlot = do
 -- | **The case the phase exists for.** @h = here@ then @goto @ is one entry, @h@
 -- is in scope on the second line, and before this phase the offer came back stuck
 -- with nothing at all.
+--
+-- **@goal@ is the session's own, and comes first** (MS12 phase 324): a typed line
+-- starts with every hole and guess bound, and the scratch goal this fixture is
+-- holding is one. It is seeded before the entry's own lines, so it is offered
+-- ahead of them.
 boundAbove :: IO ()
 boundAbove = do
   s <- withLC
   let o = offerIn s "h = here\ngoto "
   offeredStuck o @?= Nothing
-  offeredBound o @?= [BoundView "h" ACore]
+  offeredBound o @?= [BoundView "goal" ACore, BoundView "h" ACore]
 
 -- | The offside rule and a written @;@ separate instructions equally, so the two
 -- spellings of one entry must answer the same. **They did not**: an explicit @;@
@@ -530,15 +551,18 @@ severalBindings :: IO ()
 severalBindings = do
   s <- withLC
   offeredBound (offerIn s "h = here\ng = goal\ngoto ")
-    @?= [BoundView "h" ACore, BoundView "g" ACore]
+    @?= [BoundView "goal" ACore, BoundView "h" ACore, BoundView "g" ACore]
 
 -- | **Filtered by the engine, not by the frontend.** @m@ holds a @String@, so it
--- is offered at @say@'s slot and not at @goto@'s, which wants a @Core@.
+-- is offered at @say@'s slot and not at @goto@'s, which wants a @Core@ — and the
+-- session's own @goal@ is the other way round, which is what makes the pair of
+-- assertions below say that the filter is on the type and not on where a name
+-- came from.
 typedToTheSlot :: IO ()
 typedToTheSlot = do
   s <- withLC
   offeredBound (offerIn s "m = \"hi\"\nsay ") @?= [BoundView "m" AString]
-  offeredBound (offerIn s "m = \"hi\"\ngoto ") @?= []
+  offeredBound (offerIn s "m = \"hi\"\ngoto ") @?= [BoundView "goal" ACore]
 
 -- | **The ordering constraint inside the type checker.** 'Thena.Instral.Infer'
 -- defers a text literal and pins its variable in @settleText@, at the very end —
@@ -552,11 +576,15 @@ settled = do
 -- | A prefix the system would refuse contributes nothing, rather than names read
 -- out of code that will not run. @say 3@ is ill-typed — @say@ wants a @String@ —
 -- so the binding below it is not reported even though it reads.
+--
+-- **The session's @goal@ survives a broken prefix** (MS12 phase 324) and that is
+-- the point of it being here: it is bound by the session and not by the lines
+-- above, so nothing the reader has mistyped can take it away.
 brokenPrefix :: IO ()
 brokenPrefix = do
   s <- withLC
   let o = offerIn s "say 3\nh = here\ngoto "
-  offeredBound o @?= []
+  offeredBound o @?= [BoundView "goal" ACore]
 
 -- | **Not every newline starts an instruction.** A line indented past the entry
 -- continues the one above, so this is one statement and there is nothing bound.
@@ -656,6 +684,26 @@ noSynthetic = do
     , n <- names l, ours n
     ] @?= []
 
+-- | __A row in the dropdown is as wide as the name on it__ (MS12 phase 316,
+-- his report of 2026-11-14).
+--
+-- 'Thena.View.Chart.productionName' is what a frontend writes on the row, and
+-- the operand productions this module builds put the language in theirs. The
+-- language was the parser's key, so the row read
+-- @Core\/\`examples.Stlc01Syntax.LC[app]@ — and the popup is capped, so the
+-- shape beside it never made it onto the screen.
+--
+-- **Pinned by the dotted path and not by the whole label**, because the label's
+-- shape is this module's business and may change; what may never come back is
+-- the module path in it.
+labelIsTheTag :: IO ()
+labelIsTheTag = do
+  s <- withLC
+  let labels = map productionName (offeredProductions (offerIn s "fill "))
+  [ l | l <- labels, "examples." `isInfixOf` l ] @?= []
+  if "Core/`LC" `elem` labels && "Core/`LC[app]" `elem` labels then pure ()
+    else assertFailure ("expected LC's two operand labels: " <> show labels)
+
 -- | The object grammars are concatenated into one rule set with @instral@'s own
 -- productions, so their nonterminals share a namespace. A language name and a
 -- metavariable are identifiers and cannot contain a @:@; @instral@'s heads all do.
@@ -697,7 +745,7 @@ productionsMayShareAWord :: IO ()
 productionsMayShareAWord = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load test/fixtures/two-languages-one-production.thena"
-  s <- case following s1 r of
+  s <- case following Strict s1 r of
     Just io -> do (s2, _, _) <- io; pure s2
     Nothing -> pure s1
   let opened l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ("fill " <> l)) ]
@@ -821,6 +869,92 @@ statementUntouched = do
   offeredStuck o @?= Nothing
   if ALiteralSymbol "LC`" `elem` offeredOptions o then pure ()
     else assertFailure "a statement line must be unaffected by the command grammar"
+
+-- | **The sharpest form of @~k4s5h@, which the tui track measured under a pty**:
+-- @:cons@ offered @:consult@ and @cons@ offered four ops whose spelling happens
+-- to start the same way, and not @consult@. @impo@ offered nothing at all.
+--
+-- **The ops are still there**, which is the point of a line standing at a head
+-- that derives either: a bare line may be an act or a rule call, and until the
+-- user has finished the word nobody knows which.
+actPrefix :: IO ()
+actPrefix = do
+  (s, _) <- startingSession
+  let offered l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s l) ]
+  offered "impo" @?= ["import"]
+  offered "cons"
+    @?= [ "constructors-of", "constructor-datatype", "constructor-arguments"
+        , "constructor-recursive-arguments", "consult" ]
+  offered "ope"  @?= ["open-case", "open"]
+  offered "decl" @?= ["declare-primitive", "declare"]
+  offered "dat"
+    @?= ["datatype-of", "datatype-parameters", "datatype-indices", "data"]
+
+-- | An empty line offers every act, as it offers every op.
+actsOffered :: IO ()
+actsOffered = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "") ]
+  filter (`notElem` offered) actWords @?= []
+
+-- | **@open@'s argument is the one an act has that is enumerable** — a read of
+-- the session, so it is right for whatever is loaded, the way @:parse@'s
+-- languages are.
+namespacesOffered :: IO ()
+namespacesOffered = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open ") ]
+  offered @?= openableNamespaces s
+  -- The prelude's own, so the set is not empty for an accidental reason.
+  filter (`notElem` offered) ["Eq", "List", "Eq.lemmata"] @?= []
+
+-- | **The half-typed case, which needed the line's own text** (phase 312): a
+-- statement is asked about context-free, and asking @open E@ that way answered
+-- nothing at all, @E@ being no word a line may start with.
+namespacePrefix :: IO ()
+namespacePrefix = do
+  (s, _) <- startingSession
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open E") ]
+    @?= ["Empty", "Empty.lemmata", "Eq", "Eq.lemmata"]
+
+-- | **The property the whole thing exists for: no row refuses when it is
+-- taken.** A namespace can be inhabited and still be ambiguous from where the
+-- writer stands, so the offer asks @open@'s own question
+-- ('Thena.Global.Env.namespaceUnder') rather than a second one written beside
+-- it — the @~hrmkp@ lesson, which is the tui track's too.
+--
+-- Each row is run from the session the offer was made in, not from the one the
+-- row before it left.
+noRowRefuses :: IO ()
+noRowRefuses = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open ") ]
+      refused w =
+        let said = unwords (renderResponse s (snd (oneLine s ("open " <> w))))
+         in if ("opened " <> w) `isInfixOf` said then Nothing else Just (w, said)
+  if null offered then assertFailure "no namespace was offered at all" else pure ()
+  [ p | Just p <- map refused offered ] @?= []
+
+-- | **The offer is short of rows rather than wrong about them**, and a line it
+-- cannot enumerate must still read: @open@ keeps an opaque shape beside the
+-- enumerated one, so a spelling the list does not carry is not marked stuck
+-- under the cursor.
+dottedNotStuck :: IO ()
+dottedNotStuck = do
+  (s, _) <- startingSession
+  offeredStuck (offerIn s "open Eq.lemmata") @?= Nothing
+  offeredStuck (offerIn s "import examples.Stlc01Syntax") @?= Nothing
+  offeredStuck (offerIn s "declare q : Nat") @?= Nothing
+
+-- | 'tableDispatches' for the other table: a word offered must be a word the
+-- driver answers to, established by running it.
+actsDispatch :: IO ()
+actsDispatch = do
+  (s, _) <- startingSession
+  let refused w =
+        let said = unwords (renderResponse s (snd (oneLine s w)))
+         in "no such command" `isInfixOf` said
+  filter refused actWords @?= []
 
 -- | **His ask, 2026-09-30**, relayed through @.jalivert\/REPORT.md@: the underline on
 -- a recovered tagged literal should cover the literal — @LC\`@ through the closing

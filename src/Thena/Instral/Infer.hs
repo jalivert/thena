@@ -45,6 +45,7 @@ import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
+import Thena.Instral.Pattern (CoreSlot (..), corePSlots, componentPSlots)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -79,6 +80,12 @@ data Site
     -- pattern runs before both, and a message that named the first instruction
     -- for a fault in a parameter is exactly the class @ms5\/CLOSEOUT.md@ 28
     -- records — /a message must identify the thing it is about uniquely/.
+  | InFocus GlobalName Int
+    -- ^ **a position of a clause's @at@ pattern, and which one** (MS12 phase
+    -- 358, @~9j34x@), counted from zero in writing order — the binder, then the
+    -- component's sub-terms. Its own site for 'InPattern'\'s reason: the focus
+    -- is not a parameter, and a message that called it one would point the
+    -- author at the wrong half of the head.
   | InSignature GlobalName Int
     -- ^ **the declaration itself, and its arity** (MS5 phase 67). His
     -- requirement: /a wrong annotation must report against the declaration, not
@@ -131,6 +138,7 @@ renderSite si = case si of
   -- rather than given a number alone: a clause's parameters are where the
   -- reader's eye goes last, so the word is worth the four characters.
   InPattern g i -> nameDotted g ++ ", parameter " ++ show (i + 1)
+  InFocus g i   -> nameDotted g ++ ", the focus pattern, position " ++ show (i + 1)
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -432,8 +440,8 @@ inferBlock sigs rs bound r =
 --
 -- **A name bound twice appears once, as its last binding**, which is the one in
 -- scope at the end of the block.
-boundBy :: [(String, Signature)] -> [Rule] -> Rule -> [(Name, Ty)]
-boundBy sigs rs r = snd (blockResult sigs rs [] r)
+boundBy :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [(Name, Ty)]
+boundBy sigs rs bound r = snd (blockResult sigs rs bound r)
 
 -- | Type one block and answer both halves: **what is wrong with it, and what it
 -- bound.** One walk, because two walks over the same instructions would be two
@@ -508,6 +516,7 @@ blamedOn e = case e of
       InHead n _      -> n
       InBody n _      -> n
       InPattern n _   -> n
+      InFocus n _     -> n
       InSignature n _ -> n
 
 -- | One strongly connected component: declare it, walk its clauses, generalise.
@@ -680,8 +689,15 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
   where
     walk ps res st =
       let (ctx, st1)  = patternCtx (InPattern (ruleName r)) (ruleParams r) ps st
-          st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
-       in fst (body env r res ctx (writtenPositions (ruleBody r)) st2 (ruleBody r))
+          -- **The focus pattern is typed beside the parameters** (MS12 phase
+          -- 358): its positions say their own types — a binder is the 'TIdent'
+          -- of @~gr236@ and a component's sub-terms are 'TCore' — so a clause
+          -- that reads the focus needs no annotation, exactly as one that
+          -- matches a list does.
+          (fctx, st2) = focusCtx r st1
+          ctx'        = ctx ++ fctx
+          st3         = foldl (headTest r ctx') st2 (zip [0 ..] (ruleHead r))
+       in fst (body env r res ctx' (writtenPositions (ruleBody r)) st3 (ruleBody r))
 
     resultOfSig sg = maybe [] (: []) (sigResult sg)
 
@@ -701,6 +717,24 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
 -- typing, two different things to point at, and a binding reported as a
 -- parameter is exactly the class @ms5\/CLOSEOUT.md@ 28 is about: /a message
 -- must identify the thing it is about uniquely/.
+-- | Type a clause\'s @at@ pattern (MS12 phase 358, @~9j34x@).
+--
+-- **It is 'patternCtx' with the types read off the positions instead of off a
+-- signature**, which is the difference between the focus and a parameter: a
+-- parameter\'s type is what the caller passes and has to be inferred or
+-- declared, where a component\'s binder is always an identifier and its
+-- sub-terms are always core terms. So nothing here can clash with a signature,
+-- and a rule that writes @at@ declares nothing extra.
+focusCtx :: Rule -> St -> ([(Name, Local)], St)
+focusCtx r st = case ruleFocus r of
+  Nothing -> ([], st)
+  Just cp ->
+    let slots = componentPSlots cp
+     in patternCtx (InFocus (ruleName r))
+                   (map snd slots)
+                   (map (coreSlotType . fst) slots)
+                   st
+
 patternCtx :: (Int -> Site) -> [Pattern] -> [Ty] -> St -> ([(Name, Local)], St)
 patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
   where
@@ -719,6 +753,19 @@ patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
             hole (acc, k) (slot, q) =
               let (bs, k') = go si q (slotType slot) k in (acc ++ bs, k')
          in foldl hole ([], st1) (holesOf sk)
+      -- **A core term is a 'TCore' and each hole takes its slot's type** (MS12
+      -- phases 352 and 355, @~9j34x@) — the same shape a 'PObject' has one
+      -- language up, and for the same reason: the position decides, and the
+      -- position was settled when the pattern was read. A @${…}@ at a term
+      -- stands where a term stands and takes a 'TCore'; one at a /binder/ takes
+      -- the 'TIdent' of @~gr236@, so a rule that matches
+      -- @core\`∀ (${x} : ${T}) -> ${E}\`@ may hand @x@ straight to @intro@ and
+      -- nothing has to be annotated.
+      PCore cp ->
+        let st1 = unify si t TCore st
+            hole (acc, k) (slot, q) =
+              let (bs, k') = go si q (coreSlotType slot) k in (acc ++ bs, k')
+         in foldl hole ([], st1) (corePSlots cp)
       PInt _   -> ([], unify si t TInt st)
       PChar _  -> ([], unify si t TChar st)
       PBool _  -> ([], unify si t TBool st)
@@ -989,6 +1036,16 @@ slotType slot = case slot of
   -- and the check at declaration refuses the rest.
   AtPrimitive _                 -> TString
 
+-- | 'slotType' for a core region's three positions (MS12 phases 355 and 361).
+-- A binder takes the 'TIdent' of @~gr236@, which is what lets a matched @∀@'s
+-- binder go straight to @intro@ with nothing annotated, and a level argument
+-- takes the 'TLevel' that @universe-at@ has always consumed (@~bkrvn@).
+coreSlotType :: CoreSlot -> Ty
+coreSlotType slot = case slot of
+  AtCore   -> TCore
+  AtBinder -> TIdent
+  AtLevel  -> TLevel
+
 -- | Each hole with the slot it stands at, left to right.
 holesOf :: Skeleton a -> [(Slot, a)]
 holesOf sk = case sk of
@@ -1019,8 +1076,9 @@ operandType ctx si o st = case o of
     -- **Each occurrence is typed where it sits** (phase 90): a binding used
     -- in both kinds of position is asked both questions, and one of them fails.
     let hole s sp = case sp of
-          TermSplice x -> operandAgainst ctx si TCore (Ref x) s
-          NameSplice x -> operandAgainst ctx si TName (Ref x) s
+          TermSplice x  -> operandAgainst ctx si TCore (Ref x) s
+          NameSplice x  -> operandAgainst ctx si TName (Ref x) s
+          LevelSplice x -> operandAgainst ctx si TLevel (Ref x) s
         st1 = foldl hole st (splices raw)
      in valueType si (VRaw raw) st1
   Lit v      -> valueType si v st
@@ -1045,6 +1103,11 @@ valueType si v st = case v of
   -- unlike a text literal, a name value has an introduction form of its own, so
   -- there is nothing deferred about it.
   VName _    -> (TName, st)
+  -- **And an identifier is a 'TIdent' the same way** (MS12 phase 353): it has
+  -- an introduction form of its own — @name-ident@, and a binder pattern — so
+  -- nothing about it is deferred. The /written/ form at that type is a text
+  -- literal, which never reaches here.
+  VIdent _   -> (TIdent, st)
   VInt _     -> (TInt, st)
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)
@@ -1085,6 +1148,10 @@ settleText st0 = foldl one st0 (stText st0)
     one st (si, want) = case shallow st want of
       TName   -> st
       TString -> st
+      -- **The third member, his ruling of 2026-11-25** (MS12 phase 353): a
+      -- written literal at an identifier position is a word with no token,
+      -- which is what @intro "A"@ means and has always meant.
+      TIdent  -> st
       TVar i  -> st { stSubst = (i, TString) : stSubst st }
       other   -> oops (TextNotTextual si (deep st other)) st
 

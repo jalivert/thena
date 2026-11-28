@@ -44,7 +44,8 @@ import Thena.Declared
   , eqNatVecCounter
   )
 import Thena.Driver
-  ( Loaded (..)
+  ( Leniency (..)
+  , Loaded (..)
   , Response (..)
   , Session
   , loadProofSource
@@ -120,7 +121,7 @@ vtailTests =
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
-        @?= "\8704 (n1 : Nat.Nat) -> A -> Vec.Vec A n1 -> (Eq.Eq {0} Nat.Nat n1 (Nat.succ n) -> Vec.Vec A n) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n) -> Vec.Vec A n"
+        @?= "∀ (n : Nat.Nat) -> A -> Vec.Vec A n -> (Eq.Eq {0} Nat.Nat n (Nat.succ n†) -> Vec.Vec A n†) -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n†) -> Vec.Vec A n†"
 
     -- **AND IT GENERALISES NOTHING, WHICH IS WHY THE TWO ABOVE READ AS THEY
     -- DID BEFORE MS9 PHASE 191.** A copy is demanded only where a rule's own
@@ -178,14 +179,19 @@ vtailTests =
     -- that name is the CALLER's: every method type in the system spells the
     -- binder @ih@, so the name the arm freshens does not exist in the type.
     --
-    -- An argument's name is the __declaration's__, which is what the method
-    -- type carries — @n@, where the printer shows @n1@ because @n@ is taken in
-    -- the ambient context. Nothing binds an argument by it: the arm's pattern
-    -- does that, and this is here so that @binder-name@ is total.
+    -- An argument's name is the __declaration's, MADE FREE WHERE IT LANDS__ —
+    -- his ruling of 2026-11-20, /THERE IS ONE NAME/, part one, @~n4jhj@ phase
+    -- one. The method type carries @n@, the word @Vec@'s declaration wrote, and
+    -- the ambient context this method is stated in has an @n@ of its own, so
+    -- the word is @n1@. **It used to be @n@ here and @n1@ on the screen**, the
+    -- printer renaming it on the way out while nothing read that back: a report
+    -- saying @n@ is a word that reaches the ambient variable instead.
+    -- Nothing binds an argument by it: the arm's pattern does that, and this is
+    -- here so that @binder-name@ is total.
   , testCase "cons's method: the report says what each binder is" $
       reportOf vecContext (run' eqNatVec vecContext vecCounter
                                 "Vec.cons" vecShape (methodOf 1))
-        @?= [ ("argument n", Just "n")
+        @?= [ ("argument n1", Just "n")
             , ("argument a",  Nothing)
             , ("argument as", Nothing)
             , ("hypothesis as", Nothing)
@@ -401,7 +407,7 @@ omittedTests =
     -- them.
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/OmittedCases.thena"
+      (_, _, stopped) <- loadProofFile Strict s "examples/OmittedCases.thena"
       assertBool (unlines (map show stopped)) (null stopped)
 
     -- __The refusal names the case and not the rule since MS9 phase 230__, his
@@ -429,7 +435,7 @@ omittedTests =
 accepts :: [String] -> Assertion
 accepts ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> pure ()
     (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
 
@@ -437,7 +443,7 @@ accepts ls = do
 refusedWith :: String -> [String] -> Assertion
 refusedWith what ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> assertFailure ("loaded, and it should not have")
     (s1, other)
       | what `isInfixOf` unwords (renderResponse s1 other) -> pure ()
@@ -663,7 +669,7 @@ engineTests =
     script call =
       declarations
         ++ [ ":theorem vtail : \8704 (A : Type\8320) (n : Nat) (v : Vec A (succ n)) -> Vec A n"
-           , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
+           , "attack", "intro", "intro", "intro"
            , call
            , ":revalidate"
            ]
@@ -715,7 +721,7 @@ splitBase :: String
 splitBase = unlines
   [ "rule base splitting where"
   , "split-all : Core -> Name -> ()"
-  , "rule split-all t d :- when focus-is-hole"
+  , "rule split-all t d at ? _ : _ :-"
   , "  do (hs, k) = prim-eliminate t"
   , "     ; cs = constructors-of d"
   , "     ; split-each cs hs k"
@@ -734,7 +740,7 @@ splitBase = unlines
   , "     ; split-each cs hs k"
   , ""
   , "split-second : Core -> Name -> ()"
-  , "rule split-second t c :- when focus-is-hole"
+  , "rule split-second t c at ? _ : _ :-"
   , "  do ([_, h], k) = prim-eliminate t"
   , "     ; goto h"
   , "     ; ihs = constructor-recursive-arguments c"

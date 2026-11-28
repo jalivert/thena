@@ -1,0 +1,59 @@
+-- The demo's language: TAPL's arithmetic and boolean expressions.
+--
+-- Load it in a FRESH session, not beside the Stlc series: both declare a
+-- language called `Ty`, and two languages of one name cannot be installed at
+-- once.
+--
+--   ./tc examples/demo/Demo01Expressions.thena
+--
+-- then try   :show Tm      :parse Tm ( if true then 0 else ( succ 0 ) )
+
+module examples.demo.Demo01Expressions where
+
+-- Two types. Each production becomes a constructor of a datatype the block
+-- declares for you:
+--
+--   data Ty : Type₀ where
+--     bool : Ty
+--     nat  : Ty
+language Ty, T, S where
+  bool -> Bool
+  nat  -> Nat
+
+open Ty
+
+-- The terms. `M`, `N` and `P` are the metavariables: in any rule or literal
+-- below, each stands for a term of this language.
+language Tm, M, N, P where
+  true   -> true
+  false  -> false
+  cond   -> ( if M then N else P )
+  zero   -> 0
+  succ   -> ( succ M )
+  pred   -> ( pred M )
+  isZero -> ( iszero M )
+
+open Tm
+
+-- ---------------------------------------------------------------------------
+-- Terms are written in the notation the grammar just defined, between
+-- backticks — and the literal IS the constructor application.
+
+two : Tm
+two = Tm`( succ ( succ 0 ) )`
+
+twoIsSuccSucc : Eq Tm two (succ (succ zero))
+twoIsSuccSucc = refl Tm (succ (succ zero))
+
+-- `${…}` splices a Thena term into the notation, so terms compose.
+three : Tm
+three = Tm`( succ ${two} )`
+
+-- A conditional, written as it reads.
+test : Tm
+test = Tm`( if ( iszero 0 ) then ${two} else 0 )`
+
+-- `Tm[succ]` starts the parse at one production, so this can only be a
+-- successor and nothing else.
+onlyASucc : Tm
+onlyASucc = Tm[succ]`( succ 0 )`

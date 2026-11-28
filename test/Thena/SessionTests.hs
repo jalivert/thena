@@ -22,7 +22,7 @@ import Thena.Declared (declaredAs, named, natDecl)
 import Thena.Standard (withRules)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Thena.Instral.Type (Ty (..))
-import Thena.Rules (RuleError (..))
+import Thena.Rules (RuleError (..), faultWhy)
 import Thena.Driver
   ( CommandError (..)
   , Entry (..)
@@ -37,6 +37,7 @@ import Thena.Driver
   , loadSource
   , oneLine
   , newSession
+  , provedSlices
   , provedUnder
   , Session
   , recordOf
@@ -101,11 +102,56 @@ recordTests =
   , testCase "and the declaration before it belongs to no proof" $
       map entryProof (take 1 (recordOf (afterLines ["data N : Type0 where { z : N }"])))
         @?= [Nothing]
+
+    -- **What a session on disc is keyed by** (MS12 phase 311): the proof's name
+    -- as text and where its lines are, which is the half of the index the
+    -- frontend cannot work out for itself — it has the lines and the engine has
+    -- the names. The indices are into 'submittedLines'.
+  , testCase "a sealed proof is a name and a span of the transcript" $
+      provedSlices
+        (afterLinesProving
+           [ "data " ++ natDecl
+           , "open Nat"
+           , ":theorem t : Type\8320"
+           , "try-core core`Nat`"
+           , "solve"
+           , "qed"
+           ])
+        @?= [("t", 2, 5)]
+
+    -- **An attempt that was given up is not a proof**, so it is absent rather
+    -- than present and empty: @isDeclared@ is the test, and @:abandon@ leaves
+    -- nothing declared.
+  , testCase "an abandoned attempt is not one" $
+      provedSlices (afterLines [":theorem t : Type\8320", ":abandon"]) @?= []
+
+    -- **A parked proof is two runs and not one span**, which is why this is a
+    -- list of slices rather than a single pair per name: the lines between them
+    -- belong to no proof, and submitting the runs in the order given — the
+    -- @:suspend@ and @:resume@ lines included — replays it.
+  , testCase "a proof parked and picked up again is two runs under one name" $
+      provedSlices
+        (afterLinesProving
+           [ ":theorem t : Type\8320"
+           , ":suspend"
+           , "data " ++ natDecl
+           , "open Nat"
+           , ":resume t"
+           , "try-core core`Nat`"
+           , "solve"
+           , "qed"
+           ])
+        @?= [("t", 0, 1), ("t", 4, 7)]
   ]
 
 -- | A session the given lines have been typed into, in order.
 afterLines :: [String] -> Session
 afterLines = foldl (\s l -> fst (oneLine s l)) newSession
+
+-- | The same, from a session that has the standard base — which the tactic
+-- words need, so a test that has to seal a proof starts here.
+afterLinesProving :: [String] -> Session
+afterLinesProving = foldl (\s l -> fst (oneLine s l)) withRules
 
 -- --------------------------------------------------------------------------
 -- Undo, over generated scripts (2026-09-13)
@@ -269,7 +315,9 @@ failureStaysInTheLine =
           (before == after)
     ]
   where
-    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "prove"]
+    -- The @back@ is the way out to the guess @attack@ made, which is what
+    -- @regret@ acts on (MS12 phase 357).
+    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "step", "back"]
 
 -- --------------------------------------------------------------------------
 -- The deliverable
@@ -292,13 +340,15 @@ identityProof =
   , "attack"
   , "intro"
   , "intro"
-  -- Down into the guess and past the two binders it just made, to the hole.
-  , "into"
-  , "along"
-  , "along"
-  -- The second binder of @A -> A@ is written @_@, because a non-dependent Π
-  -- carries that identifier (§2.6). It is an ordinary name and is typed as one.
-  , "try-core core`_`"
+  -- No navigation: @attack@ left the cursor on the hole it opened and each
+  -- @intro@ leaves it on what is left to prove (MS12 phase 357).
+  -- **The second binder of @A -> A@ is called @x@ — his ruling of 2026-11-20.**
+  -- A non-dependent Π carries 'Thena.Core.Term.anonymousIdent' (§2.6), which is
+  -- not a name; 'Thena.Core.Context.writableIn' mints a real one as the binder
+  -- enters the context, so the word the development shows is the word that
+  -- resolves. It used to be @_@, and @_@ reached the innermost of however many
+  -- binders had no name — silently, which is what the ruling is about.
+  , "try-core core`x`"
   , "solve"
   , "back"
   , "back"
@@ -339,13 +389,13 @@ holeTests =
   , halts "and refuses a focus that is not a hole at all"
       (goal ++ ["along", "attack"]) (NoClauseMatched "attack" 0 [0])
   , halts "intro refuses a hole that has not been attacked"
-      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0])
+      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0, 1, 1])
   , halts "and a guess whose type is neither a ∀ nor a let"
-      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0])
+      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0, 1, 1])
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
-  , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core core`zero`"])
+  , ok "try attaches a guess"             (natGoal ++ ["attack", "try-core core`zero`"])
 
     -- **A bare argument is neither vocabulary as of MS5 phase 62b** — it is an
     -- @instral@ reference, so this one is simply a name nothing bound. The
@@ -356,31 +406,34 @@ holeTests =
     -- validated and typed like a rule file now, so an unbound name is a
     -- 'Thena.Rules.UnboundInRule' at entry time.
   , refuses "a bare argument is a reference, not a term"
-      (natGoal ++ ["attack", "into", "try-core zero"])
-      [UnboundInRule (rootName "entry") 0 "zero"]
+      (natGoal ++ ["attack", "try-core zero"])
+      [UnboundInRule (rootName "entry") 0 "zero" (TVar 0)]
     -- And the vocabularies still do not mix: the surface fence makes a
     -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
   , mistyped "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core surface`zero`"])
+      (natGoal ++ ["attack", "try-core surface`zero`"])
       [Clash (InBody (rootName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
-      (natGoal ++ ["attack", "into", "try-core core`succ zero`"])
+      (natGoal ++ ["attack", "try-core core`succ zero`"])
   , ok "and regret takes it off again"
-      (natGoal ++ ["attack", "into", "try-core core`zero`", "regret"])
+      (natGoal ++ ["attack", "try-core core`zero`", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
       (NoClauseMatched "regret" 0 [0])
 
   , ok "solve commits a pure guess"
-      (natGoal ++ ["attack", "into", "try-core core`zero`", "solve"])
-  , notYetPure "and refuses one that is not pure" (natGoal ++ ["attack", "solve"])
+      (natGoal ++ ["attack", "try-core core`zero`", "solve"])
+    -- @attack@ leaves the cursor on the hole it opened, so the way to the guess
+    -- it made is @back@ — the guess is what @solve@ acts on (MS12 phase 357).
+  , notYetPure "and refuses one that is not pure"
+      (natGoal ++ ["attack", "back", "solve"])
 
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
     -- the new hole is a @back@ — the path gained a step and this pops it.
   , ok "abandon drops a hole nothing refers to"
-      (natGoal ++ ["attack", "into", "claim \"spare\" core`Nat`", "back", "abandon"])
+      (natGoal ++ ["attack", "claim \"spare\" core`Nat`", "back", "abandon"])
   , halts "and refuses one that is still referred to"
       (natGoal ++ ["abandon"]) (CannotMove StillReferenced)
   ]
@@ -1037,7 +1090,7 @@ halts name ls why = testCase name $
 refuses :: String -> [String] -> [RuleError] -> TestTree
 refuses name ls es = testCase name $
   case reverse (loadedResponses (run ls)) of
-    LineRefused es' : _ -> es' @?= es
+    LineRefused es' : _ -> map faultWhy es' @?= es
     other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
 
 -- | The entry resolved and does not type check (MS5 review).

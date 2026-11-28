@@ -23,7 +23,8 @@ import Thena.Instral.Concrete
   )
 import Thena.Syntax.Print (printRuleFile)
 import Thena.Driver
-  ( CommandError (..)
+  ( Leniency (..)
+  , CommandError (..)
   , Stop (..)
   , Response (..)
   , RuleFileError (..)
@@ -44,10 +45,13 @@ import Thena.Driver
   )
 import Thena.Engine (rules)
 import qualified Thena.Engine as Engine
-import Thena.Instral.Ops (Value (..))
+import Thena.Instral.Ops (Origin (..), Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Instral.Ops (Rule (..), Pattern (..))
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Instral.Type (Ty (..))
+import Thena.Instral.Concrete (RawSignature (..))
+import Thena.Rules (RuleBase (..), RuleError (..), RuleFault (..))
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.View.Source (printItem)
 
 tests :: TestTree
@@ -97,7 +101,7 @@ opens =
     , testCase "open X in a declaration holds that declaration" $
         decls ["open A in", "  r : Core"]
           @?= Right [ DeclOpenIn (RawOpen [([], "A")] RawOpenWhole)
-                        (DeclSignature (signatureOf "r")) ]
+                        (DeclSignature (signatureAt (Pos 4 3) "r")) ]
 
       -- **A path is written where a word is**, since a namespace may be nested.
     , testCase "the namespace may be a path" $
@@ -127,8 +131,13 @@ opens =
     -- The signature @r : Core@ as the parser builds it, reached by parsing it
     -- rather than written out: 'RawTy' is a type this module has no other
     -- reason to import.
-    signatureOf n = case decls [n ++ " : Core"] of
-      Right [DeclSignature g] -> g
+    --
+    -- **At a position of the caller's choosing** (MS12 phase 349, @~8w6qw@): a
+    -- signature records where it was written, and a signature nested in a block
+    -- is not where this fixture's own one-line parse puts it. So the expected
+    -- place is written down, which is what makes these cases assert it.
+    signatureAt at n = case decls [n ++ " : Core"] of
+      Right [DeclSignature (RawSignature _ nm t)] -> RawSignature at nm t
       other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- | **An `import` line in a rule file** (MS11 phase 276), **a `consult` line
@@ -172,7 +181,8 @@ imports =
       -- @Nothing@ above is the line with none and this is the same constructor.
     , testCase "import X where { … }" $
         decls ["import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Own [] "Stlc" SelectWide
+                       (Just [DeclSignature (signatureAt (Pos 4 3) "r")])]
 
       -- **@where@ with nothing after it is an EMPTY block and not a line with
       -- no block**, which is the layout rule and not a case of its own
@@ -187,7 +197,8 @@ imports =
       -- gets it.
     , testCase "public import X where { … }" $
         decls ["public import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Public [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Public [] "Stlc" SelectWide
+                       (Just [DeclSignature (signatureAt (Pos 4 3) "r")])]
 
       -- **Nesting costs no mechanism**, because a block holds what the file
       -- holds — the production takes @Decls@.
@@ -196,7 +207,7 @@ imports =
           @?= Right
                 [ DeclImport Own [] "Stlc" SelectWide
                     (Just [ DeclImport Own ["Stlc"] "Terms" SelectWide
-                              (Just [DeclSignature (signatureOf "r")]) ]) ]
+                              (Just [DeclSignature (signatureAt (Pos 5 5) "r")]) ]) ]
 
     , testCase "it survives being printed and read again" $ do
         let written = [ "import Stlc", "import Stlc.Syntax.Terms"
@@ -229,10 +240,10 @@ imports =
       Right (_, _, ds) -> Right ds
       Left e           -> Left (show e)
 
-    -- Reached by parsing it, as the group above does: 'RawSignature' is a type
-    -- this module has no other reason to import.
-    signatureOf n = case decls [n ++ " : Core"] of
-      Right [DeclSignature g] -> g
+    -- Reached by parsing it, as the group above does, and placed where the
+    -- block really puts it (MS12 phase 349).
+    signatureAt at n = case decls [n ++ " : Core"] of
+      Right [DeclSignature (RawSignature _ nm t)] -> RawSignature at nm t
       other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -304,7 +315,7 @@ headers =
 -- --------------------------------------------------------------------------
 
 oneRule :: String
-oneRule = "rule base tiny where\nrule solve :- when focus-is-guess do prim-solve\n"
+oneRule = "rule base tiny where\nrule solve at ? _ ≐ _ : _ :- do prim-solve\n"
 
 load1 :: [(FilePath, String)] -> (Session, Response)
 load1 = loadRuleTexts newSession
@@ -313,7 +324,7 @@ basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
-ruleNames b = [ nameDotted g | Rule g _ _ _ <- baseRules b ]
+ruleNames b = [ nameDotted g | Rule g _ _ _ _ _ _ <- baseRules b ]
 
 loading :: TestTree
 loading =
@@ -332,12 +343,12 @@ loading =
       -- one is the next 'rule' keyword.
       testCase "a rule may span lines" $ do
         let src = "rule base multi where\n\
-                  \rule long :- when focus-is-hole\n\
+                  \rule long at ? _ : _ :-\n\
                   \  do prim-attack\n\
                   \     ; along\n\
                   \     ; prim-solve\n\
                   \\n\
-                  \rule short :- when focus-is-guess do prim-solve\n"
+                  \rule short at ? _ ≐ _ : _ :- do prim-solve\n"
         case basesOf (fst (load1 [("m.thena.rules", src)])) of
           [b] -> do
             ruleNames b @?= ["long", "short"]
@@ -349,7 +360,7 @@ loading =
           @?= [[]]
 
     , testCase "no header is refused" $
-        refusal [("x.thena.rules", "rule solve :- when focus-is-guess do prim-solve")]
+        refusal [("x.thena.rules", "rule solve at ? _ ≐ _ : _ :- do prim-solve")]
           @?= Just ("x.thena.rules", NoRuleHeader)
 
     , -- @frobnicate@ is a rule call as of phase 25e, and @prim-solve x@ is one
@@ -357,19 +368,28 @@ loading =
       -- is a call. So the mistake left here is the scope one: @x@ is bound by
       -- nothing, which 'validate' catches when the file loads.
       testCase "a rule that does not resolve is refused, naming every mistake" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
+        refusal [("x.thena.rules", "rule base b where\nrule r at ? _ : _ :- do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x"]
+                , RuleIllFormed
+                    -- **The place is the statement's, not the clause's**
+                    -- (MS12 phase 349, @~8w6qw@): @prim-solve x@ begins 36
+                    -- characters along the line the rule begins on.
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 37)))
+                        (UnboundInRule (rootName "r") 1 "x" (TVar 0))
+                    ]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
       -- a test.
       testCase "a rule that does not validate is refused" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
+        refusal [("x.thena.rules", "rule base b where\nrule r at ? _ : _ :- do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing"] )
+                , RuleIllFormed
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 25)))
+                        (UnboundInRule (rootName "r") 0 "nothing" TCore)
+                    ] )
     ]
   where
     refusal fs = case snd (load1 fs) of
@@ -415,12 +435,12 @@ ordering =
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
-    a = ("a.thena.rules", "rule base a where\nrule helper t :- when focus-is-hole do prim-try t")
-    b = ("b.thena.rules", "rule base b where\nrule solve :- when focus-is-guess do prim-solve")
+    a = ("a.thena.rules", "rule base a where\nrule helper t at ? _ : _ :- do prim-try t")
+    b = ("b.thena.rules", "rule base b where\nrule solve at ? _ ≐ _ : _ :- do prim-solve")
     caller =
       ( "calls.thena.rules"
       , "rule base calls where\n\
-        \rule c t :- when focus-is-hole do call helper t"
+        \rule c t at ? _ : _ :- do call helper t"
       )
 
 -- --------------------------------------------------------------------------
@@ -438,7 +458,7 @@ refusals =
 
     , testCase "or while one is suspended" $
         rejected (suspended ":load extra.thena.rules")
-          @?= Just (ProofsSuspended [rootName "t"])
+          @?= Just (ProofsSuspended ["t"])
 
     , testCase "but between theorems it is allowed" $
         case snd (command newSession ":load extra.thena.rules") of
@@ -502,9 +522,9 @@ argumentHeads =
   where
     picking =
       "rule base pick where\n\
-      \rule pick s :- when focus-is-hole (surface-is-name s) \
+      \rule pick s at ? _ : _ :- when (surface-is-name s) \
       \do say \"that is a name\"\n\
-      \rule pick s :- when focus-is-hole do say \"that is not a name\"\n"
+      \rule pick s at ? _ : _ :- do say \"that is not a name\"\n"
 
     -- A claim to stand in, then the call. The last thing said is the answer.
     said line =
@@ -532,7 +552,7 @@ commands =
 
     , testCase ":rules lists the rules of every base, in order" $ do
         let s = fst (load1 [ ("tiny.thena.rules", oneRule)
-                           , ("b.thena.rules", "rule base b where\nrule attack :- when focus-is-hole do prim-attack")
+                           , ("b.thena.rules", "rule base b where\nrule attack at ? _ : _ :- do prim-attack")
                            ])
         fmap (concatMap ruleNames) (ruled s) @?= Just ["solve", "attack"]
     ]
@@ -579,7 +599,7 @@ returning =
       \rule twice t :- do s = concat t t ; return s\n\
       \rule shout t :- do m = twice (twice t) ; say m\n\
       \rule once t :- do m = twice t ; say m\n\
-      \rule sometimes t :- when focus-is-guess do return t\n\
+      \rule sometimes t at ? _ ≐ _ : _ :- do return t\n\
       \rule sometimes t :- do say \"nothing to give\"\n\
       \rule half t :- do x = sometimes t ; say x\n"
 
@@ -777,7 +797,7 @@ consulting =
       testCase "the door that cannot read a file refuses the module" $
         case itemsOf "consult Stlc.Tactics" of
           Left e -> assertFailure e
-          Right (nm, is) -> case snd (loadProofItems newSession (moduleText nm) is) of
+          Right (nm, is) -> case snd (loadProofItems Strict newSession nm is) of
             ConsultsUnread ms -> map moduleText ms @?= ["Stlc.Tactics"]
             other             -> assertFailure (show other)
 
@@ -790,7 +810,7 @@ consulting =
           Right (nm, is) ->
             -- The session has "mine"; the module is loaded against "extra"
             -- on top of it, and afterwards the session has "mine" alone.
-            let (s', _) = loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is
+            let (s', _) = loadProofItemsConsulting Strict (Pool (pool extra) [] [] []) consulted nm is
              in (map baseName (pool extra), map baseName (pool s'))
                   @?= (["extra", "mine"], ["mine"])
 
@@ -798,7 +818,7 @@ consulting =
         case itemsOf "consult Stlc.Tactics" of
           Left e -> assertFailure e
           Right (nm, is) ->
-            case snd (loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is) of
+            case snd (loadProofItemsConsulting Strict (Pool (pool extra) [] [] []) consulted nm is) of
               ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
               other                -> assertFailure (show other)
     ]

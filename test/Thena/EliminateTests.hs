@@ -21,7 +21,8 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver
-  ( Loaded (..)
+  ( Leniency (..)
+  , Loaded (..)
   , loadSource
   )
 import Thena.Standard (withRules)
@@ -232,8 +233,8 @@ dependentMotives =
             concatMap opening (eqDecl : decls)
               ++ [":theorem t : " ++ goal, "attack"]
               ++ replicate intros "intro"
-              ++ ["into"]
-              ++ replicate intros "along"
+              -- No navigation after the intros: each leaves the cursor on what
+              -- is left to prove (MS12 phase 357).
               ++ ["eliminate-core core`x`", ":revalidate"]
           l = loadSource withRules (unlines script)
        in case loadedError l of
@@ -284,12 +285,10 @@ dependentMotives =
 workedTests :: [TestTree]
 workedTests =
   [ method "eIfTrue — §3.7's own displayed method" 0
-      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.true t21 t31) (Term.ifthen Term.true t2 t3) \
-      \-> Eq.Eq {0} Term.Term t2 t21"
+      "∀ (t2 : Term.Term) (t3 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.true t2 t3) (Term.ifthen Term.true t2† t3†) -> Eq.Eq {0} Term.Term t2† t2"
 
   , method "eIfFalse — the branch ruled out by conflict on true/false" 1
-      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.false t21 t31) (Term.ifthen Term.true t2 t3) \
-      \-> Eq.Eq {0} Term.Term t2 t31"
+      "∀ (t2 : Term.Term) (t3 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.false t2 t3) (Term.ifthen Term.true t2† t3†) -> Eq.Eq {0} Term.Term t2† t3"
 
     -- The inductive hypothesis is the motive at the recursive argument's own
     -- indices, so it carries its own copy of whatever the motive constrains.
@@ -298,10 +297,7 @@ workedTests =
     -- telling you anything. An inversion does not want the hypothesis, so this
     -- one is harmless; 'friendlyTests' is where it would not have been.
   , method "eIf — and its induction hypothesis is constrained too" 2
-      "∀ (t1 : Term.Term) (t1' : Term.Term) (t21 : Term.Term) (t31 : Term.Term) -> Step.Step t1 t1' \
-      \-> (Eq.Eq {0} Term.Term t1 (Term.ifthen Term.true t2 t3) -> Eq.Eq {0} Term.Term t2 t1') \
-      \-> Eq.Eq {0} Term.Term (Term.ifthen t1 t21 t31) (Term.ifthen Term.true t2 t3) \
-      \-> Eq.Eq {0} Term.Term t2 (Term.ifthen t1' t21 t31)"
+      "∀ (t1 : Term.Term) (t1' : Term.Term) (t2 : Term.Term) (t3 : Term.Term) -> Step.Step t1 t1' -> (Eq.Eq {0} Term.Term t1 (Term.ifthen Term.true t2† t3†) -> Eq.Eq {0} Term.Term t2† t1') -> Eq.Eq {0} Term.Term (Term.ifthen t1 t2 t3) (Term.ifthen Term.true t2† t3†) -> Eq.Eq {0} Term.Term t2† (Term.ifthen t1' t2 t3)"
 
   , testCase "one subgoal per constructor, in declaration order" $
       names worked
@@ -406,9 +402,8 @@ friendlyTests :: [TestTree]
 friendlyTests =
   [ testCase "the induction hypothesis arrives unguarded" $
       map (rendered leContext . thirdOf') (elimMethods leWeaken)
-        @?= [ "∀ (n1 : Nat.Nat) -> Le.Le Nat.zero (Nat.succ n1)"
-            , "∀ (m1 : Nat.Nat) (n1 : Nat.Nat) -> Le.Le m1 n1 -> Le.Le m1 (Nat.succ n1) \
-              \-> Le.Le (Nat.succ m1) (Nat.succ (Nat.succ n1))"
+        @?= [ "∀ (n : Nat.Nat) -> Le.Le Nat.zero (Nat.succ n)"
+            , "∀ (m : Nat.Nat) (n : Nat.Nat) -> Le.Le m n -> Le.Le m (Nat.succ n) -> Le.Le (Nat.succ m) (Nat.succ (Nat.succ n))"
             ]
 
     -- Nothing is applied to the elimination: both indices were abstracted, so
@@ -425,7 +420,7 @@ friendlyTests =
       let (env, n0) = declared [eqDecl', natDecl]
           (ctx, n1) = contextOf env n0 [("a", "Nat"), ("e", "Eq {0} Nat a a")]
        in map (rendered ctx . thirdOf') (elimMethods (run "repeated" env ctx n1 "Eq {0} Nat a a" "e"))
-            @?= [ "∀ (a1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a1" ]
+            @?= [ "∀ (a : Nat.Nat) -> Eq.Eq {0} Nat.Nat a a† -> Eq.Eq {0} Nat.Nat a a† -> Eq.Eq {0} Nat.Nat a a" ]
 
     -- Every premise of the goal stays fixed (§3.7), so a premise that still
     -- mentions the index is precisely the specificity the equation exists to
@@ -437,17 +432,12 @@ friendlyTests =
           (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in do
             map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat.Nat) (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
-                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
-                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 \
-                    \-> (∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
-                    \-> Eq.Eq {0} Nat.Nat n1 n2 -> Eq.Eq {0} Nat.Nat n1 n1) \
-                    \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
-                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+              @?= [ "∀ (n : Nat.Nat) (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n n -> Eq.Eq {0} Nat.Nat (Nat.succ n†) n -> Eq.Eq {0} Nat.Nat (Nat.succ n†) (Nat.succ n†)"
+                  , "∀ (n : Nat.Nat) -> Fin.Fin n -> (∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n n -> Eq.Eq {0} Nat.Nat n† n -> Eq.Eq {0} Nat.Nat n† n†) -> ∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n n -> Eq.Eq {0} Nat.Nat (Nat.succ n†) n -> Eq.Eq {0} Nat.Nat (Nat.succ n†) (Nat.succ n†)"
                   ]
             map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
-                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> Eq.Eq {0} Nat.Nat n1 n1 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+              @?= [ "∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n)"
+                  , "∀ (n : Nat.Nat) -> Fin.Fin n -> Eq.Eq {0} Nat.Nat n n -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n)"
                   ]
 
     -- Phase 19. Both of @Below@'s indices are plain variables, so the second
@@ -455,10 +445,8 @@ friendlyTests =
     -- the first freely. Before phase 19 this whole family was refused.
   , testCase "a dependent index telescope is fine when the dependent index is friendly" $
       map (rendered belowContext . thirdOf') (elimMethods belowProbe)
-        @?= [ "∀ (m : Nat.Nat) (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
-            , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j \
-              \-> (∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat m n1 -> Nat.Nat) \
-              \-> ∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
+        @?= [ "∀ (m : Nat.Nat) (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n -> Nat.Nat"
+            , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat m n -> Nat.Nat) -> ∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n -> Nat.Nat"
             ]
 
     -- __MS9 phase 213, @~7gmvr@ step two, and this is the phase.__ Index 2 is
@@ -476,7 +464,10 @@ friendlyTests =
     --     reach;
     --   * the generalised side is this method's own index carried there along
     --     the first equation, @q@ — one J, built as
-    --     "Thena.Tactics.Specialise"'s @coerce@ is.
+    --     "Thena.Tactics.Specialise"'s @coerce@ is. **Its own equation binder
+    --     is @q2@ and not @q@** since MS12 phase 333, @~44j68@: the motive
+    --     binds @q@ and @q1@ for the two tied indices, so a third @q@ here
+    --     would be reachable by no word at all.
     --
     -- @bsMethod@'s induction hypothesis carries the same chain at @m1@, which
     -- is what says the motive is right rather than just statable.
@@ -485,33 +476,24 @@ friendlyTests =
           (ctx, n1) = contextOf env n0
             [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
-            @?= [ "∀ (m1 : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
-                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
-                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
-                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
-                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fz m1)) (Fin.fz m) -> Nat.Nat"
-                , "∀ (m1 : Nat.Nat) (j : Fin.Fin m1) -> Below.Below m1 j \
-                  \-> (∀ (q : Eq.Eq {0} Nat.Nat m1 (Nat.succ m)) \
-                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
-                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
-                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
-                  \(m1 (Nat.succ m)) q) j) (Fin.fz m) -> Nat.Nat) \
-                  \-> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
-                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
-                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
-                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
-                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fs m1 j)) (Fin.fz m) -> Nat.Nat"
+            @?= [ "∀ (m : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fz m)) (Fin.fz m†) -> Nat.Nat"
+                , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (q : Eq.Eq {0} Nat.Nat m (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) (m (Nat.succ m†)) q) j) (Fin.fz m†) -> Nat.Nat) -> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fs m j)) (Fin.fz m†) -> Nat.Nat"
                 ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
     -- not have caught: the motive's own telescope is dependent, and its second
     -- binder names /this motive's/ first binder rather than the one in the
     -- declaration, which is not in scope here at all.
+    --
+    -- **@n1@ and @i1@, not @n@ and @i@, since MS12 phase 333 (@~44j68@)**: the
+    -- datatype's own words for its indices are made free where the motive binds
+    -- them, and the context here has an @n@ and an @i@. That is also why the
+    -- generalised copy's reference reads @n1@ rather than the @n†@ it used to —
+    -- the motive's binder keeps a word instead of losing it to the copy, so
+    -- nothing is marked.
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
-        @?= "(elim Below.Below () (λ (n1 : Nat.Nat) (i1 : Fin.Fin n1) (target : Below.Below n1 i1) \
-            \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n1 n2 -> Nat.Nat) (bzMethod bsMethod) (n i) b) \
-            \n (Eq.refl {0} Nat.Nat n)"
+        @?= "(elim Below.Below () (λ (n1 : Nat.Nat) (i1 : Fin.Fin n1) (target : Below.Below n1 i1) -> ∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n1 n -> Nat.Nat) (bzMethod bsMethod) (n i) b) n (Eq.refl {0} Nat.Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
@@ -524,9 +506,8 @@ friendlyTests =
           defCtx      = [Definition dv (Ident "n") zeroV zeroT]
           (ctx,   n4) = contextOf' env defCtx n3 [("i", "Fin n")]
        in map (rendered ctx . thirdOf') (elimMethods (run "defined" env ctx n4 "Eq {0} Nat n n" "i"))
-            @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
-                , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> (Eq.Eq {0} Nat.Nat n1 n -> Eq.Eq {0} Nat.Nat n1 n1) \
-                  \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+            @?= [ "∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n) n† -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n)"
+                , "∀ (n : Nat.Nat) -> Fin.Fin n -> (Eq.Eq {0} Nat.Nat n n† -> Eq.Eq {0} Nat.Nat n n) -> Eq.Eq {0} Nat.Nat (Nat.succ n) n† -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n)"
                 ]
   ]
   where
@@ -748,7 +729,7 @@ unfoldedGoal =
   where
     unfolds what levels body = testCase what $ do
       (s0, _) <- startingSession
-      s1 <- case loadProofSource s0 (unlines
+      s1 <- case loadProofSource Strict s0 (unlines
               [ "module Unfolded where", "", "Same : List String -> Type\8320", body ]) of
               (s, ProofLoaded {}) -> pure s
               (s, other) -> assertFailure (unlines (renderResponse s other))
@@ -801,7 +782,7 @@ nestedNames =
     script =
       [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
       , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
-      , "attack", "intro", "intro", "into", "along", "along"
+      , "attack", "intro", "intro"
         -- The outer split, whose methods take the hints unchanged.
       , "eliminate-core core`m`"
         -- Into the one whose name the inner split will ask for again.

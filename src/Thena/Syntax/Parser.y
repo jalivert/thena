@@ -39,11 +39,12 @@ import Thena.Syntax.Concrete
   , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
+  , RawLevel (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawComponentP (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -83,7 +84,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '≟'     { Located _ TEquate }
   '${'    { Located _ TEscapeOpen }
   '}$'    { Located _ TEscapeClose }
-  tagopen  { Located _ (TTagOpen $$) }
+  tagopen  { Located _ (TTagOpen _) }
   tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
@@ -111,10 +112,11 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
+  at      { Located _ TAt }
   ':-'    { Located _ TNeck }
-  num     { Located _ (TNumber $$) }
-  str     { Located _ (TString $$) }
-  chr     { Located _ (TChar $$) }
+  num     { Located _ (TNumber _) }
+  str     { Located _ (TString _) }
+  chr     { Located _ (TChar _) }
   regex   { Located _ (TRegex $$) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
@@ -122,7 +124,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
-  ident   { Located _ (TIdent $$) }
+  ident   { Located _ (TIdent _) }
   qident  { Located _ (TQIdent $$) }
 
 %right '->'
@@ -157,7 +159,7 @@ Equation :: { (Raw, Raw) }
 -- The argument of @assume@ and @claim@ (§2.4's "commands are the op vocabulary
 -- spelled out"). The nameless form is the one that makes the op ask (§7.5).
 NameAndType :: { (Maybe String, Raw) }
-  : ident ':' Term                         { (Just $1, $3) }
+  : ident ':' Term                         { (Just (wordOf $1), $3) }
   | ':' Term                               { (Nothing, $2) }
 
 
@@ -171,7 +173,7 @@ NameAndType :: { (Maybe String, Raw) }
 -- split §3.7 requires disambiguated, made syntactic.
 Data :: { RawData }
   : ident MaybeBinders ':' Term where '{' Constructors '}'
-                                           { RawData $1 (reverse $2) $4 (reverse $7) }
+                                           { RawData (wordOf $1) (reverse $2) $4 (reverse $7) }
 
 MaybeBinders :: { [RawBinder] }
   :                                        { [] }
@@ -187,7 +189,7 @@ SomeConstructors :: { [RawConstructor] }
   | SomeConstructors ';' Constructor       { $3 : $1 }
 
 Constructor :: { RawConstructor }
-  : ident ':' Term                         { RawConstructor $1 $3 }
+  : ident ':' Term                         { RawConstructor (wordOf $1) $3 }
 
 -- The rule language (§8, phase 21). @:-@ separates the head — the name and its
 -- parameters — from the conditions and the body, and the space on either side
@@ -303,8 +305,8 @@ QNames :: { [([String], String)] }
 -- names**: a namespace is a prefix, so what a line can speak about is the step
 -- that follows it.
 Words :: { [String] }
-  : ident                                  { [$1] }
-  | Words ident                            { $2 : $1 }
+  : ident                                  { [wordOf $1] }
+  | Words ident                            { wordOf $2 : $1 }
 
 Renamings :: { [(String, String)] }
   : Renaming                               { [$1] }
@@ -314,10 +316,10 @@ Renamings :: { [(String, String)] }
 -- glyph a token would narrow what a name may contain, and that is a decision
 -- about identifiers and not about @open@.
 Renaming :: { (String, String) }
-  : ident '->' ident                       { ($1, $3) }
+  : ident '->' ident                       { (wordOf $1, wordOf $3) }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
+  : rule ident Params Focus ':-' Tests do Block    { RawRule (posOf $1) (wordOf $2) (reverse $3) $4 $6 (map snd (reverse $8)) (map fst (reverse $8)) }
 
 -- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
 -- "Thena.Surface.Layout" inserts these braces where the offside rule says they
@@ -331,7 +333,10 @@ Rule :: { RawRule }
 -- the system — a function\'s body, a surface term\'s block, a REPL entry — so
 -- this was the one place with a word of its own. @then@ is an ordinary
 -- identifier again in every language.
-Block :: { [RawInstr] }
+-- **A block's statements come out paired with where each begins** (MS12 phase
+-- 349, @~8w6qw@): a declaration keeps the positions beside its body and
+-- 'RawInstr' says why they are not inside it.
+Block :: { [(Pos, RawInstr)] }
   : '{' Body '}'                           { $2 }
 
 -- **A signature is its own declaration** (MS5 phase 67, his choice) — one line,
@@ -343,27 +348,34 @@ Block :: { [RawInstr] }
 -- beginning with a plain word is one of the two and the token after the name
 -- tells them apart: @=@ or another parameter here, @:@ there.
 Function :: { RawFunction }
-  : ident Params '=' FunBody               { RawFunction $1 (reverse $2) $4 }
+  : ident Params '=' FunBody               { RawFunction (posOf $1) (wordOf $1) (reverse $2) (fst $4) (snd $4) }
 
 -- **A body is one expression or a @do@ block** (MS5 phase 75b, his choice of
 -- opener). @do@ is already a layout keyword, so the block's braces come from
 -- the offside rule and a one-line @do { a ; b }@ works too.
-FunBody :: { RawBody }
-  : Rhs                                    { BodyRhs $1 }
-  | do Block                               { BodyBlock (reverse $2) }
+-- **And where its statements begin, beside it** (MS12 phase 349). The short
+-- form has none: @f x = e@ compiles to a binding nobody wrote, so the clause's
+-- own position is what a fault in it is reported at.
+FunBody :: { (RawBody, [Pos]) }
+  : Rhs                                    { (BodyRhs $1, []) }
+  | do Block                               { (BodyBlock (map snd (reverse $2)), map fst (reverse $2)) }
 
 -- What stands right of an @=@, here and in a body: an op application, or a
 -- value written down. The second case excludes a bare @ident@ — @x = y@ is a
 -- call to @y@, which is the reading it has always had.
 Rhs :: { RawRhs }
-  : Op                                     { RhsOp $1 }
+  : OpAt                                   { RhsOp (snd $1) }
   | ValueOperand                           { RhsValue $1 }
   | Lambda                                 { RhsValue $1 }
 
 -- @\ x y -> ‹expression›@ (MS5 phase 68b). @\@ and @λ@ are one token and both
 -- were already lexed, so this costs no new syntax.
+-- **A lambda keeps no positions.** Its body's faults are reported at the
+-- enclosing statement — 'Thena.Rules.validate'\'s own choice, because an index
+-- inside a lambda would collide with the body's — so there is nothing for them
+-- to be read by (MS12 phase 349).
 Lambda :: { RawOperand }
-  : 'λ' LambdaParams '->' FunBody          { RawLambda (reverse $2) $4 }
+  : 'λ' LambdaParams '->' FunBody          { RawLambda (reverse $2) (fst $4) }
 
 -- **A lambda takes at least one parameter** — his ruling, 2026-09-15 (MS5 phase
 -- 94, @ms5\/CLOSEOUT.md@ 23): /"I don't like the nullary function… we should
@@ -380,7 +392,7 @@ LambdaParams :: { [RawPattern] }
 -- token of lookahead, which is what an LALR parser has, so the two productions
 -- share their @ident@ and part on the next token with no conflict.
 Signature :: { RawSignature }
-  : ident ':' Ty                           { RawSignature $1 $3 }
+  : ident ':' Ty                           { RawSignature (posOf $1) (wordOf $1) $3 }
 
 -- The type syntax. @->@ is already @%right@, so the chain nests to the right
 -- and the last link is the result.
@@ -395,7 +407,7 @@ Ty :: { RawTy }
   | TyApp                                  { $1 }
 
 TyApp :: { RawTy }
-  : ident TyAtoms                          { RawTyCon $1 (reverse $2) }
+  : ident TyAtoms                          { RawTyCon (wordOf $1) (reverse $2) }
   | TyParen                                { $1 }
 
 TyAtoms :: { [RawTy] }
@@ -403,7 +415,7 @@ TyAtoms :: { [RawTy] }
   | TyAtoms TyAtom                         { $2 : $1 }
 
 TyAtom :: { RawTy }
-  : ident                                  { RawTyCon $1 [] }
+  : ident                                  { RawTyCon (wordOf $1) [] }
   | TyParen                                { $1 }
 
 TyParen :: { RawTy }
@@ -439,29 +451,29 @@ Params :: { [RawPattern] }
 -- and @'(' PatAtom ',' PatAtom ')'@ pair is the same shape 'ValueOperand'
 -- already carries, and parts on the same one token of lookahead.
 PatAtom :: { RawPattern }
-  : ident                                  { RawPWord $1 }
-  | CompoundPat                            { $1 }
+  : ident                                  { RawPWord (wordOf $1) }
+  | CompoundPat                            { snd $1 }
 
 -- Every pattern form but a bare name — what a binding's left may be without
 -- colliding with an op word or an annotation (MS5 phase 84).
-CompoundPat :: { RawPattern }
-  : num                                    { RawPInt (fromInteger $1) }
-  | str                                    { RawPText $1 }
-  | chr                                    { RawPChar $1 }
-  | '[' ']'                                { RawPList [] Nothing }
-  | '[' PatItems ']'                       { RawPList (reverse $2) Nothing }
-  | '[' PatItems ',' '...' PatAtom ']'     { RawPList (reverse $2) (Just $5) }
-  | '[' '...' PatAtom ']'                  { RawPList [] (Just $3) }
-  | '(' ident PatAtoms ')'                 { RawPApp $2 (reverse $3) }
-  | '(' PatAtom ',' PatAtom ')'            { RawPPair $2 $4 }
+CompoundPat :: { (Pos, RawPattern) }
+  : num                                    { (posOf $1, RawPInt (fromInteger (numOf $1))) }
+  | str                                    { (posOf $1, RawPText (strOf $1)) }
+  | chr                                    { (posOf $1, RawPChar (chrOf $1)) }
+  | '[' ']'                                { (posOf $1, RawPList [] Nothing) }
+  | '[' PatItems ']'                       { (posOf $1, RawPList (reverse $2) Nothing) }
+  | '[' PatItems ',' '...' PatAtom ']'     { (posOf $1, RawPList (reverse $2) (Just $5)) }
+  | '[' '...' PatAtom ']'                  { (posOf $1, RawPList [] (Just $3)) }
+  | '(' ident PatAtoms ')'                 { (posOf $1, RawPApp (wordOf $2) (reverse $3)) }
+  | '(' PatAtom ',' PatAtom ')'            { (posOf $1, RawPPair $2 $4) }
   -- **A term of an object language, as a pattern** (MS6 phase 104c). It reads
   -- the same as the operand form above and means the other direction: a
   -- @${x}@ binds here where it supplies there (@patterns-and-the-editor.md@
   -- \u00a75).
-  | tagopen Pieces tagclose                { RawPObject $1 Nothing (concat (reverse $2)) }
-  | tagopen tagclose                       { RawPObject $1 Nothing "" }
-  | tagat Pieces tagclose                  { patternAt $1 (concat (reverse $2)) }
-  | tagat tagclose                         { patternAt $1 "" }
+  | tagopen Pieces tagclose                { (posOf $1, RawPObject (tagOf $1) Nothing (concat (reverse $2))) }
+  | tagopen tagclose                       { (posOf $1, RawPObject (tagOf $1) Nothing "") }
+  | tagat Pieces tagclose                  { (posOf $1, patternAt $1 (concat (reverse $2))) }
+  | tagat tagclose                         { (posOf $1, patternAt $1 "") }
 
 PatAtoms :: { [RawPattern] }
   :                                        { [] }
@@ -471,10 +483,53 @@ PatItems :: { [RawPattern] }
   : PatAtom                                { [$1] }
   | PatItems ',' PatAtom                   { $3 : $1 }
 
+-- | The focus, as a pattern after @at@ (MS12 phase 358, @~9j34x@; his framing
+-- of 2026-09-14, /@at@ names the subject and the tag names the language/).
+--
+-- **@at@ had to become a token and that is measured** (@~86bnn@, his ruling of
+-- 2026-11-26). The definition form below begins with a name, so with the marker
+-- left an ordinary @ident@ the parser cannot tell @rule r at x = v : S@ from
+-- @rule r a b@ with the one token of lookahead it has: Happy answers eight
+-- shift\/reduce conflicts in one state, against none with the token.
+--
+-- **It is written between the parameters and the neck, which is where §8 left
+-- the space for it** — /the space on either side of @:-@ is deliberately
+-- unused: pattern matching on the focus and on the goal is coming and will
+-- attach to the head/ (decided 2026-08-25).
+Focus :: { Maybe RawComponentP }
+  :                                        { Nothing }
+  | at ComponentP                          { Just $2 }
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in, and with no fence — his ruling of 2026-09-13, while the
+-- development calculus is built in. **Plus a sixth form that names no shape:**
+-- a lone pattern, meaning /any/ component (MS12 phase 363, @~9m27n@, his
+-- ruling of 2026-11-27). @at _@ is what the five clauses that used to ask
+-- @focus-is-component@ write, and the test is gone.
+--
+-- **One state decides between the lone pattern and a definition**, and one
+-- token of lookahead settles it: after @at@ and a pattern, an @=@ shifts and
+-- anything else reduces. @happy@ reports 0 conflicts, the count the grammar has
+-- always had — measured 2026-11-26 for this production and again when it
+-- landed.
+--
+-- **Every position is a @PatAtom@**, so a bare word binds and a @core\`…\`@
+-- region stands wherever a term does. **The guess form takes a pattern at its
+-- @≐@ and resolution refuses anything but @_@**: a refusal naming the form is
+-- worth more than a parse error naming a token, and
+-- 'Thena.Rules.resolveComponentP' is where it is said.
+ComponentP :: { RawComponentP }
+  : PatAtom                                { RawCPAny $1 }
+  | 'λ' PatAtom ':' PatAtom                { RawCPAssume $2 $4 }
+  | PatAtom '=' PatAtom ':' PatAtom        { RawCPDefine $1 $3 $5 }
+  | '?' PatAtom ':' PatAtom                { RawCPClaim $2 $4 }
+  | '?' PatAtom '≐' PatAtom ':' PatAtom    { RawCPGuess $2 $4 $6 }
+  | '∀' PatAtom ':' PatAtom                { RawCPQuantify $2 $4 }
+
 -- A head is a run of tests with nothing between them, so a test that takes
--- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
+-- operands is parenthesised — @when goal-type-is-pi (surface-is-name t)@ — and a
 -- bare word is a test of no operands (MS4 phase 47). Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would parse as one test applied to
+-- @when goal-type-is-pi goal-type-is-let@ would parse as one test applied to
 -- another word, which is the same ambiguity a REPL argument run has and is
 -- answered the same way.
 Tests :: { [RawTest] }
@@ -486,8 +541,8 @@ TestRun :: { [RawTest] }
   | TestRun Test                           { $2 : $1 }
 
 Test :: { RawTest }
-  : ident                                  { RawTest $1 [] }
-  | '(' ident Operands ')'                 { RawTest $2 (reverse $3) }
+  : ident                                  { RawTest (wordOf $1) [] }
+  | '(' ident Operands ')'                 { RawTest (wordOf $2) (reverse $3) }
 
 -- Accumulated in reverse, like 'Binders'.
 --
@@ -499,7 +554,7 @@ Test :: { RawTest }
 -- are different answers, so an empty body says something.
 --
 -- @then@ stays required, so a rule still says where its body begins.
-Body :: { [RawInstr] }
+Body :: { [(Pos, RawInstr)] }
   :                                        { [] }
   | Instr                                  { [$1] }
   | Body ';' Instr                         { $3 : $1 }
@@ -516,20 +571,28 @@ Body :: { [RawInstr] }
 -- those three on the token after the name is the one token of lookahead an LALR
 -- parser has. 'CompoundPat' is 'PatAtom' without that case, so nothing here can
 -- begin with an @ident@ twice.
-Instr :: { RawInstr }
-  : ident '=' Rhs                          { RawBind (RawPWord $1) $3 }
-  | CompoundPat '=' Rhs                    { RawBind $1 $3 }
+-- **Each one comes out with where it begins** (MS12 phase 349, @~8w6qw@): the
+-- name of a binding, the first token of a compound pattern, the name of an
+-- annotation, the word of a bare op. The pair is unzipped by the declaration
+-- that holds the block.
+Instr :: { (Pos, RawInstr) }
+  : ident '=' Rhs                          { (posOf $1, RawBind (RawPWord (wordOf $1)) $3) }
+  | CompoundPat '=' Rhs                    { (fst $1, RawBind (snd $1) $3) }
   -- **A local's type, written as its own line** (MS5 phase 77) — the same
   -- spelling a declaration uses one level up, and told from a binding by the
   -- token after the name exactly as a signature is told from a function.
-  | ident ':' Ty                           { RawAnnot $1 $3 }
-  | Op                                     { RawDo $1 }
+  | ident ':' Ty                           { (posOf $1, RawAnnot (wordOf $1) $3) }
+  | OpAt                                   { (fst $1, RawDo (snd $1)) }
 
 -- One shape for every op: a word and whatever was written after it. Which op
 -- the word names, and whether it was given the right arguments, is resolution's
 -- (§2.5 — the parser is shallow).
-Op :: { RawOp }
-  : ident Operands                         { RawOp $1 (reverse $2) }
+-- **It comes out with where its word is written** (MS12 phase 349, @~8w6qw@),
+-- which is where a bare instruction begins. The position is dropped right of an
+-- @=@, where the instruction began earlier; it is on the production rather than
+-- in 'RawOp' because 'RawInstr' says why no position goes inside the tree.
+OpAt :: { (Pos, RawOp) }
+  : ident Operands                         { (posOf $1, RawOp (wordOf $1) (reverse $2)) }
 
 -- | A REPL line's arguments (MS5 phase 62b) — the same run of operands a rule
 -- body writes after an op word, and its own start symbol because the driver has
@@ -539,13 +602,13 @@ Operands :: { [RawOperand] }
   | Operands Operand                       { $2 : $1 }
 
 Operand :: { RawOperand }
-  : ident                                  { RawRef $1 }
+  : ident                                  { RawRef (wordOf $1) }
   | ValueOperand                           { $1 }
 
 -- Every operand but a bare name. Split out at MS5 phase 68a so that the right
 -- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
 ValueOperand :: { RawOperand }
-  : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  : '(' ident Operands ')'                 { RawNested (wordOf $2) (reverse $3) }
   -- **A dotted word is a name literal** (MS10 phase 245), where a bare one is a
   -- reference to a binding: only a global name has a path, so the dot is the
   -- whole of the distinction. It is what lets the prelude write
@@ -559,9 +622,9 @@ ValueOperand :: { RawOperand }
   -- **A lambda in an argument takes parentheses**, like every other compound
   -- argument (§6.0.1); bare, it is what stands right of an @=@.
   | '(' Lambda ')'                         { $2 }
-  | num                                    { RawPos (fromInteger $1) }
-  | str                                    { RawText $1 }
-  | chr                                    { RawChar $1 }
+  | num                                    { RawPos (fromInteger (numOf $1)) }
+  | str                                    { RawText (strOf $1) }
+  | chr                                    { RawChar (chrOf $1) }
   | '[' ']'                                { RawList [] }
   | '[' Elements ']'                       { RawList (reverse $2) }
   | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
@@ -570,8 +633,8 @@ ValueOperand :: { RawOperand }
   -- region early; this puts it back, because what a region /is/ is text for an
   -- embedded parser and the embedded parser reads @${x}@ itself. So the pieces
   -- below are a reader for what the scanner produced and not a second meaning.
-  | tagopen Pieces tagclose                { RawRegion $1 Nothing (concat (reverse $2)) }
-  | tagopen tagclose                       { RawRegion $1 Nothing "" }
+  | tagopen Pieces tagclose                { RawRegion (tagOf $1) Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion (tagOf $1) Nothing "" }
   -- **A tag may name the production to start at** (MS6 phase 104c), which is
   -- what tells @LC[var]\`…\`@ from @LC\`…\`@: a variable occurrence, or any term.
   | tagat Pieces tagclose                  { regionAt $1 (concat (reverse $2)) }
@@ -583,7 +646,7 @@ Pieces :: { [String] }
 
 Piece :: { String }
   : raw                                    { $1 }
-  | '${' ident '}$'                        { "${" ++ $2 ++ "}" }
+  | '${' ident '}$'                        { "${" ++ wordOf $2 ++ "}" }
 
 
 Elements :: { [RawOperand] }
@@ -604,7 +667,7 @@ App :: { Raw }
 -- unqualified name has no steps. The lexer has already cut a qualified one into
 -- its pieces, so there is no splitting here and no dotted string anywhere.
 QName :: { ([String], String) }
-  : ident                                  { ([], $1) }
+  : ident                                  { ([], wordOf $1) }
   | qident                                 { (init $1, last $1) }
 
 Atom :: { Raw }
@@ -614,22 +677,22 @@ Atom :: { Raw }
   -- The closing brace is its own token: the region scanner emits
   -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
   -- cannot be confused with a level-argument brace.
-  | '${' ident '}$'                        { RawSplice $2 }
+  | '${' ident '}$'                        { RawSplice (wordOf $2) }
   | QName LevelArgs                        { RawAt (fst $1) (RawWord (snd $1)) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
   -- A literal of a primitive type is an atom, for a name's reason: it stands
   -- where a name stands and needs no precedence (MS6 phase 97a).
-  | str                                    { RawPrimitive (LString $1) }
-  | chr                                    { RawPrimitive (LChar $1) }
-  | num                                    { RawPrimitive (LInt $1) }
+  | str                                    { RawPrimitive (LString (strOf $1)) }
+  | chr                                    { RawPrimitive (LChar (chrOf $1)) }
+  | num                                    { RawPrimitive (LInt (numOf $1)) }
   | regex                                  { RawPrimitive (LRegex $1) }
   -- **A tagged term literal is an atom** (MS6 phase 110), for a name's reason:
   -- a region is delimited by its backticks, so it needs no precedence. The
   -- surface has had one since phase 104; this is the same region, read by the
   -- same lexer, in the development calculus's own grammar.
-  | tagopen ObjectBits tagclose            { RawObject $1 Nothing (reverse $2) }
-  | tagopen tagclose                       { RawObject $1 Nothing [] }
+  | tagopen ObjectBits tagclose            { RawObject (tagOf $1) Nothing (reverse $2) }
+  | tagopen tagclose                       { RawObject (tagOf $1) Nothing [] }
   | tagat ObjectBits tagclose              { taggedRaw $1 (reverse $2) }
   | tagat tagclose                         { taggedRaw $1 [] }
   | '(' Term ')'                           { $2 }
@@ -652,15 +715,20 @@ ObjectBit :: { RawPiece }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
-LevelArgs :: { [Int] }
+LevelArgs :: { [RawLevel] }
   : '{' LevelAtoms '}'                     { reverse $2 }
 
-LevelAtoms :: { [Int] }
+LevelAtoms :: { [RawLevel] }
   :                                        { [] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
-LevelAtom :: { Int }
-  : num                                    { fromInteger $1 }
+-- **A level argument is a numeral or a splice** (MS12 phase 361, @~bkrvn@):
+-- the third position his /a splice supplies a nonterminal/ reaches, and the
+-- one production serves an operand and a pattern alike, since both read a
+-- @RawLevel@.
+LevelAtom :: { RawLevel }
+  : num                                    { RawLevelNat (fromInteger (numOf $1)) }
+  | '${' ident '}$'                        { RawLevelSplice (wordOf $2) }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
@@ -689,8 +757,8 @@ Binders :: { [RawBinder] }
 -- term position yields a 'Thena.Syntax.Concrete.RawSplice' and holds a
 -- @Core@, a name position yields a 'RawIdentSplice' and holds a @Name@.
 Ident :: { RawIdent }
-  : ident                                  { RawWord $1 }
-  | '${' ident '}$'                        { RawIdentSplice $2 }
+  : ident                                  { RawWord (wordOf $1) }
+  | '${' ident '}$'                        { RawIdentSplice (wordOf $2) }
 
 -- | The datatype an @elim@ names, with its path's steps (MS10 phase 254).
 --
@@ -715,6 +783,47 @@ regionAt :: Located Token -> String -> RawOperand
 regionAt t src = case t of
   Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
   _ -> error "the tag token is TTagOpenAt"
+
+-- | Where a token is, for the trees that record where a clause was written
+-- (MS12 phase 342).
+posOf :: Located Token -> Pos
+posOf (Located p _) = p
+
+-- | The text of an identifier token (MS12 phase 344, @~5n7tz@).
+--
+-- **An identifier is taken whole and not through @$$@**, so that a production
+-- which needs to say where the name was written can ask. It is the same bargain
+-- 'regionAt' struck for a tag: @$$@ keeps a token's payload and drops its
+-- position, and a function declaration opens with its name, so reading the name
+-- through @$$@ left the @=@ as the nearest token carrying a position — which is
+-- the wrong line as soon as the @=@ is written on its own.
+wordOf :: Located Token -> String
+wordOf t = case t of
+  Located _ (TIdent w) -> w
+  _ -> error "the identifier token is TIdent"
+
+-- | The payload of the three literal tokens and of a plain tag, taken whole
+-- for 'wordOf'\'s reason (MS12 phase 349, @~8w6qw@): a pattern may open an
+-- instruction, so the token that begins one has to be able to say where it is.
+numOf :: Located Token -> Integer
+numOf t = case t of
+  Located _ (TNumber n) -> n
+  _ -> error "the numeral token is TNumber"
+
+strOf :: Located Token -> String
+strOf t = case t of
+  Located _ (TString x) -> x
+  _ -> error "the string token is TString"
+
+chrOf :: Located Token -> Char
+chrOf t = case t of
+  Located _ (TChar c) -> c
+  _ -> error "the character token is TChar"
+
+tagOf :: Located Token -> String
+tagOf t = case t of
+  Located _ (TTagOpen lang) -> lang
+  _ -> error "the tag token is TTagOpen"
 
 patternAt :: Located Token -> String -> RawPattern
 patternAt t src = case t of

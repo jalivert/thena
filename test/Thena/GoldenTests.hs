@@ -159,11 +159,10 @@ tests =
         , "intro"
         , "intro"
         , ":show"
-        , "into"
-        , "along"
-        , "along"
         , ":where"
-        , "try-core core`_`"
+          -- @x@, not @_@: his ruling of 2026-11-20 gives an argument the
+          -- statement did not name a real, writable one.
+        , "try-core core`x`"
         , "solve"
         , "back"
         , "back"
@@ -173,6 +172,63 @@ tests =
         , "qed"
         , ":show id"
         , ":proofs"
+        , ":quit"
+        ]
+      -- HIS RULING OF 2026-11-20, and his ask of the same day: an argument the
+      -- statement did not name gets a real, writable name, and @intro@ can say
+      -- what that name is. Three things are on this screen and all three are the
+      -- point — two unnamed arguments come out @x@ and @x1@ rather than @_@
+      -- twice; @fill core`x`@ reaches the one the display calls @x@, where @_@
+      -- used to reach the innermost; and @intro "a"@ names a binder outright.
+      -- The middle theorem is the collision: the statement writes @x@ itself, so
+      -- the argument with no name takes @x1@ and shadows nothing.
+    , script
+        "binder-names"
+        [ ":theorem projection : \8704 (T : Type\8320) -> T -> T -> T"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , ":show"
+        , "goto projection1"
+        , ":where"
+        , "fill core`x`"
+        , ":show"
+        , ":abandon"
+        , ":theorem shadowed : \8704 (x : Type\8320) -> x -> x"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "goto shadowed1"
+        , ":where"
+        , ":abandon"
+        , ":theorem named : \8704 (T : Type\8320) -> T -> T -> T"
+        , "attack"
+        , "intro"
+        , "intro \"a\""
+        , "intro \"b\""
+        , "goto named1"
+        , ":where"
+        , "fill core`a`"
+        , ":show"
+        , ":abandon"
+          -- HIS RULING OF 2026-11-20, /THERE IS ONE NAME/, part one, @~n4jhj@
+          -- phase one: **a word the system takes off the goal's type is made
+          -- free where the binder lands.** The statement writes @x@ twice, a
+          -- bare @intro@ copies that word out of a closed type, and the second
+          -- binder is STORED as @x1@ — where until this phase it was stored as
+          -- @x@ and only the printer said @x1@, so @:infer x1@ answered /not in
+          -- scope/ while @:infer x@ gave the inner binder the screen called
+          -- @x1@. Both lines below are the test: each word on the screen is
+          -- answered by the thing printed under it.
+        , ":theorem twice : \8704 (x : Type\8320) -> \8704 (x : Type\8320) -> x"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "goto twice1"
+        , ":where"
+        , ":infer x1"
+        , ":infer x"
         , ":quit"
         ]
       -- Phase 15's deliverable: what could be done next, at each shape of
@@ -193,8 +249,6 @@ tests =
         , "attack"
         , ":matches"
         , "intro"
-        , "into"
-        , "along"
         , ":where"
         , ":matches"
         , ":abandon"
@@ -226,16 +280,16 @@ tests =
           -- Three rules match a guess; two are nullary, so dispatch is a real
           -- choice and the machine says which it took.
         , ":matches"
-        , "prove"
+        , "step"
         , ":show"
         , ":choices"
           -- Deterministic commands in between. They push no frame (the peek),
-          -- and they do not disturb the one that is there.
-        , "into"
+          -- and they do not disturb the one that is there. @back@ then @into@
+          -- is a round trip: the cursor is on the hole below the binder @step@
+          -- introduced, so @back@ stands on that binder and @along@ returns.
+        , "back"
         , "along"
         , ":where"
-        , "back"
-        , "back"
         , ":choices"
           -- retry takes one ALTERNATIVE, not one command: it pops back past
           -- everything since, restores the development, and runs the next one.
@@ -257,7 +311,7 @@ tests =
           -- **And a suspended proof keeps its own**, which is what makes going
           -- away to prove a side lemma safe: `:suspend` snapshots before it
           -- clears, and a snapshot is @(Exec, Development, [Development])@.
-        , "prove"
+        , "step"
         , ":choices"
         , ":suspend"
         , ":theorem lemma : Type\8321"
@@ -344,13 +398,12 @@ tests =
         "structural"
         [ ":theorem byhand : Type\8321"
         , "attack"
-          -- @quantify@ is @intro@'s twin: it acts at the guess and claims the
-          -- codomain at its own universe, which is why the Π's level is not
-          -- pinned to the codomain's.
+          -- @quantify@ is @intro@'s twin: it acts at the hole the cursor stands
+          -- on and claims the codomain at its own universe, which is why the
+          -- Π's level is not pinned to the codomain's. It leaves the cursor on
+          -- that codomain hole, so there is nothing to navigate.
         , "quantify \"A\" core`Type\8320`"
         , ":show"
-        , "into"
-        , "along"
         , "try-core core`Type\8320`"
         , "solve"
         , "back"
@@ -390,9 +443,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , ":where"
           -- Two questions, two answers: the second lists only what could
           -- elaborate that hint.
@@ -416,9 +466,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "elaborate surface`b`"
           -- **Applying a non-function says so**, since MS8 phase 170. The
           -- name-headed clause's refusal used to be discarded by the
@@ -432,9 +479,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , ":step on"
         , "elaborate surface`a`"
         , ":step"
@@ -634,10 +678,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , "eliminate-core core`e`"
         , "back"
         , ":where"
@@ -655,8 +695,6 @@ tests =
         , ":theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`n`"
         , ":show"
         , "back"
@@ -695,8 +733,6 @@ tests =
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`p`"
         , ":where"
         , "back"
@@ -737,9 +773,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`i`"
         , "eliminate-core core`n`"
         , ":abandon"
@@ -761,10 +794,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , ":matches"
         , "eliminate-core core`Type₀`"
         , "eliminate-core core`succ`"
@@ -792,9 +821,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`b`"
         , ":where"
         , ":abandon"
@@ -819,9 +845,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`c`"
         , ":quit"
         ]
@@ -1104,10 +1127,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , "apply-core core`f`"
         , ":show"
         , "goto-named \"_\""
@@ -1168,8 +1187,6 @@ tests =
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , ":where"
         , "apply-core core`Just`"
         , "goto-named \"a\""
@@ -1178,9 +1195,12 @@ tests =
         , "solve"
         , "qed"
         , ":show h"
-          -- The head is the guard, so @apply@ at a guess never runs its body.
+          -- The head is the guard, so @apply@ at a guess never runs its body —
+          -- and @back@ is what stands at one, @attack@ having left the cursor on
+          -- the hole inside it (MS12 phase 357).
         , ":theorem guessed : Bool"
         , "attack"
+        , "back"
         , "apply-core core`true`"
         , ":abandon"
         ]
@@ -1359,8 +1379,6 @@ tests =
         , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`b`"
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
@@ -1597,7 +1615,6 @@ tests =
         , ":trust none"
         , ":theorem viaHonest : Eq {0} Nat zero zero"
         , "attack"
-        , "into"
         , "try-core core`honest {0}`"
         , "solve"
         , "back"
@@ -1606,7 +1623,6 @@ tests =
         , "qed"
         , ":theorem viaLiar : Eq {0} Nat zero (succ zero)"
         , "attack"
-        , "into"
         , "try-core core`liar {0}`"
         , "solve"
         , "back"
@@ -1616,6 +1632,156 @@ tests =
           -- away and the development is still there to look at.
         , "qed"
         , ":trust any"
+        , "qed"
+        , ":quit"
+        ]
+      -- **A rule that finds its own hypothesis** (MS12): @in-scope@ answers the
+      -- context as terms, @any-of@ offers them as alternatives, and the guess
+      -- that does not type check is what drives the search on. The three cases
+      -- that matter are the three blocks below.
+    , script
+        "in-scope"
+        [ -- Innermost first, so the hypothesis that fits is the FIRST candidate
+          -- and there is no backtracking line at all.
+          ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "goto second1"
+        , ":where"
+        , "try-in-scope"
+        , ":show"
+        , ":choices"
+        , ":abandon"
+          -- And the same statement with the answer at the OUTER binder: the
+          -- innermost candidate is tried, the guess is refused, and the machine
+          -- comes back for the next one.
+        , ":theorem first : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "goto first1"
+        , "try-in-scope"
+        , ":show"
+        , ":abandon"
+          -- **Nothing in scope is a failure and not a crash**, and the message
+          -- names the helper that ran out of list rather than the rule the user
+          -- typed. That wording is a known rough edge.
+        , ":theorem alone : Type\8321"
+        , "try-in-scope"
+        , ":abandon"
+        , ":quit"
+        ]
+    , script
+        "step-in-scope"
+        [ -- **A bare @prove@ can close a goal from the context now**, which is
+          -- what putting @try-in-scope@ above @attack@ bought (his instruction
+          -- of 2026-11-23). The first five @prove@s are @attack@ and four
+          -- @intro@s, each taken only after @try-in-scope@ and @fit-in-scope@
+          -- have failed at a goal with nothing in scope; the sixth closes
+          -- @second1@ with @x1@ and no term was typed.
+          --
+          -- **The cap is here so that a regression fails the suite rather than
+          -- hanging it.** Before the reorder these six lines were an
+          -- attack, solve, regret cycle that never came back.
+          ":step 600"
+        , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "goto second1"
+        , "step"
+        , ":show"
+        , ":choices"
+        , ":abandon"
+          -- **And a statement whose hypothesis has to be APPLIED.**
+          -- @try-in-scope@ offers all four context entries and none of them
+          -- fits; @fit-in-scope@ then takes @x1@, claims @? a : A@ above the
+          -- focus and fits @x1 a@ at @B@. Every proof step here is @prove@;
+          -- the three moves and the final @solve@ are typed by hand because
+          -- nothing in the machine focuses the next goal.
+        , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "goto mp1"
+        , "step"
+        , "goto a"
+        , "step"
+        , "step"
+        , "goto-root"
+        , "solve"
+        , "qed"
+        , ":quit"
+        ]
+      -- **The machine focuses the next goal itself** (@~g3qnw@, his ruling of
+      -- 2026-11-23: derive it, do not keep a queue). Every @goto@ in
+      -- @step-in-scope@ above is a @next@ here and nothing else changes, so
+      -- the two transcripts together are the before and after.
+      --
+      -- Three things are pinned, and they are the definition.
+      --
+      --   * **@next@ on a goal stays put.** The first one, before any tactic,
+      --     leaves the focus on @second@ — so a strategy may write @next@
+      --     before every step without skipping work.
+      --   * **Innermost first, then outward.** After the four @intro@s the
+      --     focus is deep in @second@'s body and @next@ takes @second1@; once
+      --     @second1@ is solved the only goal left /encloses/ the position, and
+      --     @next@ takes it. **That is the cascade @goto-root@ used to be.**
+      --   * **It refuses when the development is finished**, which is what lets
+      --     a strategy stop rather than wander.
+      --
+      -- @second@ is the case his question was about: nothing below the cursor,
+      -- and the one goal left above it. The list is @[second, second1]@ and
+      -- @second@ does not count while it holds a goal — @solve@ would refuse
+      -- it — so the answer is @second1@, where the cursor already is.
+    , script
+        "next-goal"
+        [ ":step 600"
+        , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "next"
+        , ":show"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "next"
+        , ":show"
+        , "step"
+        , "next"
+        , ":show"
+        , "solve"
+        , "next"
+        , ":show"
+        , "solve"
+        , "next"
+        , "qed"
+          -- **And the applying case, with no name typed by hand at all.**
+          -- @fit-in-scope@ claims @? a : A@ above the focus; @next@ reaches it
+          -- without knowing its name, which is the whole point — @a@ was minted
+          -- by the machine, so no rule base could have contained it.
+        , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "next"
+        , "step"
+        , "next"
+        , "step"
+        , "step"
+        , "next"
+        , "solve"
         , "qed"
         , ":quit"
         ]

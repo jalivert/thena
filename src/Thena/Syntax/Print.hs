@@ -26,6 +26,8 @@ module Thena.Syntax.Print
   , rawRhs
   , rawFunBody
   , rawPattern
+  , corePText
+  , componentPText
   , rawTy
     -- * Declarations, blocks and whole files
   , rawDecl
@@ -39,8 +41,13 @@ module Thena.Syntax.Print
   , escapeRaw
     -- * Naming and levels, shared by both printers and by the display builder
   , Env
+  , Naming (..)
+  , naming
+  , scopeOf
   , nameOf
-  , freshen
+  , nameAt
+  , reachesIn
+  , dagger
   , renderLevel
   , renderLevelBody
   , renderLevelAtom
@@ -50,8 +57,11 @@ module Thena.Syntax.Print
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
-import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
+import Thena.Core.Level (Level, Normal (..), levelOfNat, levelVarName, normalise)
+import Thena.Core.Context
+  (Context, entryIdent, entryVar, wordReaches)
+import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
+import Thena.Instral.Pattern (CoreP (..), LevelP (..), ComponentP (..), Pattern)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -60,6 +70,7 @@ import Thena.Instral.Concrete
   , RawOpenSpec (..)
   , RawFunction (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawSignature (..)
   , RawTest (..)
   , RawTy (..)
@@ -152,6 +163,136 @@ block is = case is of
 -- lexer does not accept. The surface case a few lines below always used the
 -- right pair; these did not, and nothing exercised them until a whole rule file
 -- had to be printed and re-read (MS7 phase 112c).
+-- | A core pattern, in the development calculus's own notation, **with the
+-- @core@ fence around it** (MS12 phase 352, @~9j34x@).
+--
+-- **Here and not in a display renderer, because it reads back**, which is this
+-- module's own line: @core\`trusted ${c} ${a} ${b}\`@ printed from a pattern
+-- parses to that pattern again. That is what 'Thena.Instral.Pattern.PObject'
+-- cannot promise — a skeleton prints as the constructor application it is,
+-- since writing the region back needs the grammar — and what a core pattern
+-- can, the development calculus being Thena's own.
+--
+-- **A name is written WHOLE, scope or none**, which is the line
+-- 'Thena.Render.renderSkeleton' already draws one language up (MS10 phase 254):
+-- a pattern is printed where there is no scope to shorten against, and a whole
+-- name resolves under any scope — so @:rules@ lists @core\`And.And ${a} ${b}\`@
+-- for a clause whose file wrote @And@, and that spelling reads back.
+--
+-- **Only a literal is region-escaped.** A name, a keyword and a level hold
+-- none of @\`@, @$@ or @\\@, and a @${…}@ must NOT be escaped or the scanner
+-- reads the @$@ as a character instead of an escape opener — which is the one
+-- thing 'Thena.Render.coreRegion' cannot be used for here.
+-- | A component pattern, in the notation @spec\/machine.md@ §3.2 prints the
+-- five development components in and the grammar after @at@ accepts (MS12
+-- phase 358, @~9j34x@).
+--
+-- **Here and not in a display renderer, for 'corePText'\'s reason**: what it
+-- prints reads back. @? x ≐ _ : s@ printed from a pattern parses to that
+-- pattern again, so @:rules@ can list a clause's focus and the line a reader
+-- copies is a line the grammar takes.
+--
+-- **No fence**, his ruling of 2026-09-13, while the development calculus is
+-- built in. **The guess's @≐@ always prints @_@**, which is the only thing that
+-- may stand there.
+-- **The pattern printer comes in**, as 'corePText'\'s does, so the two display
+-- renderers keep their own spelling of a pattern and share this one of a
+-- component.
+componentPText :: (Pattern -> String) -> ComponentP -> String
+componentPText f cp = case cp of
+  CompAny      x     -> f x
+  CompAssume   x s   -> "λ " ++ f x ++ " : " ++ f s
+  CompDefine   x v s -> f x ++ " = " ++ f v ++ " : " ++ f s
+  CompClaim    x s   -> "? " ++ f x ++ " : " ++ f s
+  CompGuess    x s   -> "? " ++ f x ++ " ≐ _ : " ++ f s
+  CompQuantify x s   -> "∀ " ++ f x ++ " : " ++ f s
+
+corePText :: (a -> String) -> CoreP a -> String
+corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
+  where
+    top c = case c of
+      CPApp {} -> unwords (map atom (hd : args))
+        where (hd, args) = spine c []
+      -- **A keyword and a fixed number of atoms**, which is the grammar's own
+      -- shape for both of these.
+      CPTrusted cl ac b -> unwords ["trusted", atom cl, atom ac, atom b]
+      -- **A binder group is written out one binder at a time**, never collected
+      -- back into @∀ (x : S) (y : T) ->@: the reader nests them, so one per
+      -- quantifier is the spelling that reads back to the same tree with the
+      -- fewest rules here.
+      CPPi x d b  -> unwords ["∀", bound x d, "->", top b]
+      CPLam x d b -> unwords ["λ", bound x d, "->", top b]
+      CPLet x v ty b ->
+        unwords ["let", hole x, "=", top v, ":", top ty, "in", top b]
+      CPEliminate d ls ps m ms is t ->
+        unwords
+          [ "elim", nameDotted d ++ patternLevels ls
+          , group ps, atom m, group ms, group is, atom t
+          ]
+      _ -> atom c
+
+    atom c = case c of
+      CPHole a       -> hole a
+      CPName n ls    -> nameDotted n ++ patternLevels ls
+      CPUniverse k   -> "Type" ++ subscript k
+      CPLit l        -> concatMap escapeRaw (literal l)
+      _              -> "(" ++ top c ++ ")"
+
+    -- A splice, written so the region scanner reads the @$@ as an escape
+    -- opener — see the note above.
+    hole a = "$" ++ ['{'] ++ at a ++ ['}']
+
+    -- **A level argument prints as it was written** (MS12 phase 361,
+    -- @~bkrvn@): a numeral, or the splice standing at it. 'levelArgs' is the
+    -- printer for a 'Thena.Core.Level.Level' and a pattern's levels are not
+    -- all levels, so the braces are written here instead of mapping into it.
+    patternLevels ls
+      | null ls   = ""
+      | otherwise = " {" ++ unwords (map lvl ls) ++ "}"
+      where
+        lvl l = case l of
+          LPNat k  -> renderLevelAtom (levelOfNat k)
+          LPHole a -> hole a
+
+    -- **A binder's name position is a splice too**, so it is written the same
+    -- way; what differs is that the grammar wants a name there, which is why
+    -- a written word has no reading ('Thena.Rules.corePattern').
+    bound x d = "(" ++ hole x ++ " : " ++ top d ++ ")"
+
+    group ps = "(" ++ unwords (map atom ps) ++ ")"
+
+    spine c acc = case c of
+      CPApp f a -> spine f (a : acc)
+      _         -> (c, acc)
+
+    literal l = case l of
+      LString x -> escapeString x
+      LChar ch  -> escapeChar ch
+      LInt k    -> show k
+      LRegex r  -> "/" ++ r ++ "/"
+
+-- | The focus of a rule head, as written (MS12 phase 358, @~9j34x@).
+--
+-- **A printed base has to read back**, so a clause that wrote @at@ prints it:
+-- without this the focus would be dropped and the rule would come back
+-- matching every component.
+focus :: Maybe RawComponentP -> String
+focus Nothing   = ""
+focus (Just cp) = " at " ++ rawComponentP cp
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in — the spelling the grammar accepts, so what this writes parses.
+rawComponentP :: RawComponentP -> String
+rawComponentP cp = case cp of
+  RawCPAny      x     -> p x
+  RawCPAssume   x s   -> "λ " ++ p x ++ " : " ++ p s
+  RawCPDefine   x v s -> p x ++ " = " ++ p v ++ " : " ++ p s
+  RawCPClaim    x s   -> "? " ++ p x ++ " : " ++ p s
+  RawCPGuess    x g s -> "? " ++ p x ++ " ≐ " ++ p g ++ " : " ++ p s
+  RawCPQuantify x s   -> "∀ " ++ p x ++ " : " ++ p s
+  where
+    p = rawPattern
+
 rawPattern :: RawPattern -> String
 rawPattern rp = case rp of
   RawPWord w   -> w
@@ -398,11 +539,12 @@ rawTyAtom t = case t of
 -- reconstruction of the original file.
 rawDecl :: RawDecl -> [String]
 rawDecl d = case d of
-  DeclSignature (RawSignature n t) -> [n ++ " : " ++ rawTy t]
-  DeclFunction (RawFunction n ps b) ->
+  DeclSignature (RawSignature _ n t) -> [n ++ " : " ++ rawTy t]
+  DeclFunction (RawFunction _ n ps b _) ->
     header (n ++ concatMap ((" " ++) . rawPattern) ps) b
-  DeclRule (RawRule n ps ts is) ->
-    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
+  DeclRule (RawRule _ n ps cp ts is _) ->
+    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ focus cp
+       ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
   -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one
   -- line and then the declaration it reaches, indented under it, so a
@@ -578,26 +720,94 @@ kindWord k = case k of
 -- Keeping one copy is what stops a term displaying under one name in the
 -- terminal and another in the editor.
 
--- | The freshening environment: minted variables paired with their display
--- names. Threaded through both the term and the development printers.
-type Env = [(Var, String)]
+-- | The scope a printer has descended through: every binder in sight, paired
+-- with its naming, __innermost first__. Threaded through both the term and the
+-- development printers.
+--
+-- **It used to be the /freshening/ environment and is not one any more — his
+-- ruling of 2026-11-20**, @.claude\/RULINGS.md@, /THERE IS ONE NAME/. A binder
+-- arrives here under the word it is really stored with, because
+-- 'Thena.Core.Context.writableIn' made that word free where the binder was
+-- built; what this list is asked for is the word and, where a word was written
+-- twice, which of them it still reaches.
+type Env = [(Var, Naming)]
 
+-- | A binder as a printer sees it: the word that __reaches__ it, and the word
+-- it is __shown__ under.
+--
+-- **They are the same for every binder but one, and the exception is his
+-- direction of 2026-10-29**: a definition whose body is just another variable
+-- is shown under that variable's word, so a refusal names a word the reader
+-- can see instead of one the elaborator minted
+-- ('Thena.Render.envOf' is where that happens). **A borrowed word takes
+-- nothing from the binder it was borrowed from**, which is why 'reachesIn'
+-- asks 'namingWord' and never what is on screen — judged on the screen, the
+-- alias would mark its own endpoint dead, which is the opposite of what a
+-- reader's word does there.
+data Naming = Naming
+  { namingWord  :: String
+  , namingShown :: String
+  }
+  deriving (Eq, Show)
+
+-- | A binder shown under its own word, which is all of them but the alias.
+naming :: String -> Naming
+naming w = Naming { namingWord = w, namingShown = w }
+
+-- | The scope a context is, __innermost first__ — the one fold every printer
+-- and every view folds it with, so they cannot disagree about what a variable
+-- is called or about which words are still live.
+--
+-- **"Thena.Render" folds its own on top of this one** and nothing else does:
+-- there, a definition whose body is just another variable borrows that
+-- variable's word to be shown under (his direction of 2026-10-29), which is a
+-- refusal's wording and not a naming rule.
+scopeOf :: Context -> Env
+scopeOf = foldl add []
+  where
+    add e entry =
+      let Ident h = entryIdent entry
+       in (entryVar entry, naming h) : e
+
+-- | The word a variable is shown under, unmarked. A variable in no scope prints
+-- as itself in guillemets, which says what it is without a mark.
 nameOf :: Var -> Env -> String
 nameOf v env = case lookup v env of
-  Just s  -> s
+  Just n  -> namingShown n
   Nothing -> "‹" ++ show v ++ "›"
 
--- | A binder whose identifier is already in scope is renamed, because a term
--- whose body refers to the /outer/ one would otherwise print as one that
--- re-parses to the inner (§2.6). Keywords are avoided for the same reason.
-freshen :: String -> Env -> String
-freshen hint env
-  | ok hint   = hint
-  | otherwise = pick (1 :: Int)
-  where
-    taken = map snd env
-    ok s = s `notElem` taken && s `notElem` ["let", "in", "forall"]
-    pick k = let s = hint ++ show k in if ok s then s else pick (k + 1)
+-- | Whether the word a variable is shown under still reaches it here —
+-- 'Thena.Core.Context.wordReaches' asked of a printer's scope.
+reachesIn :: Var -> Env -> Bool
+reachesIn v env = case [ k | (k, (x, _)) <- zip [0 ..] env, x == v ] of
+  k : _ -> wordReaches (map (namingWord . snd) env) k
+  []    -> True
+
+-- | The word a variable is shown under __as the terminal shows it__: marked
+-- when it reaches nothing.
+--
+-- **The mark is a character here and a flag on the boundary**, and that split
+-- is deliberate — his, 2026-11-20. This module is the terminal's printer, so
+-- the terminal's choice of glyph belongs in it; a view hands a frontend
+-- 'reachesIn'\'s answer instead, because a dagger glued into a view's text
+-- would be unstyleable there and could be read back as part of a name.
+nameAt :: Var -> Env -> String
+nameAt v env
+  | reachesIn v env = nameOf v env
+  | otherwise       = nameOf v env ++ [dagger]
+
+-- | The terminal's mark for a word that reaches nothing — Lean 4's answer to
+-- the same question, and what the write-up is named after.
+--
+-- **Deliberately not a reserved character.** Reserving it would narrow every
+-- name in every modelled language at once, which
+-- "Thena.Syntax.Lexer"\'s own reservation argues against; left ordinary, a
+-- daggered word typed back is simply a name nothing binds, which refuses
+-- loudly. Print-parse is lost for a term that still mentions a dead binder and
+-- only for such a term — an accepted cost of the ruling, repaired by renaming
+-- the binder.
+dagger :: Char
+dagger = '†'
 
 
 -- | Render a universe, **normalising first** (phase 28).

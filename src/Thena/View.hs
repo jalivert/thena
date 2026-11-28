@@ -39,11 +39,17 @@ module Thena.View
     Session
   , sessionGlobals
   , sessionGrammars
+  , sessionScope
   , sessionRules
   , sessionCursor
   , sessionContext
   , sessionNames
   , sessionTrust
+    -- | __A global name as text__, in full and with no printer policy on it —
+    -- what an index written to disc is keyed by. @Thena.Render.nameString@
+    -- applies the shortest ending that is unambiguous under what is open,
+    -- which is right on screen and wrong in a file.
+  , nameDotted
     -- ** and the driver's own reads, so that one import serves a frontend
   , workingOn
   , parked
@@ -56,11 +62,19 @@ module Thena.View
   , Budget (..)
   , spellingOf
   , developmentView
+  , goalsView
+  , GoalView (..)
+  , GoalKind (..)
   , machineView
+  , choicesView
   , focusTypeView
   , rulesView
   , matchesView
+  , MatchView
   , trustView
+  , failureView
+  , refusedFileView
+  , proofsView
   , parseView
   , offerView
   , statementOfferView
@@ -73,15 +87,19 @@ module Thena.View
 
 import Data.Foldable (toList)
 
-import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), Spelling (..), nameDotted, Ident (..), Var)
+import Thena.Core.Context (Context)
+import Thena.Core.Term (GlobalName (..), InScope, Spelling (..), nameDotted, Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
-  ( Session
+  ( RuleFileError
+  , Session
+  , Unfinished
+  , currentQuest
   , fuelOf
   , machineOf
+  , openableNamespaces
   , parked
   , parsingLanguage
   , pendingQuestion
@@ -89,13 +107,14 @@ import Thena.Driver
   , workingOn
   )
 import Thena.Core.Trust (TrustLevel)
-import Thena.Engine (Machine (..), cursor, development, focusContext, knownTo, rules)
+import Thena.Engine
+  (Machine (..), choicePoints, cursor, development, focusContext, goalEnv, knownTo, ruleTypes, rules)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
 import Thena.Language.Grammar (Grammar)
-import Thena.Rules (RuleBase (..), RuleIter, matches, next)
-import Thena.Syntax.Print (Env, freshen)
+import Thena.Rules (RuleBase (..), groupParams, matchingRules)
+import Thena.Syntax.Print (Env, scopeOf)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
 import Thena.View.Chart
   ( FailureView
@@ -106,10 +125,15 @@ import Thena.View.Chart
   , displayOffer
   , displayParse
   )
+import Thena.View.Choices (ChoiceView, displayChoice)
+import Thena.View.Matches (MatchView, displayMatch)
 import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
+import Thena.View.Proofs (ProofsView, displayProofs)
+import Thena.View.Goals (GoalKind (..), GoalView (..), goalsOf)
 import Thena.View.Statement (statementOffer)
+import Thena.View.Failure (StopView, displayRuleFile, displayStop)
 import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
 
@@ -124,6 +148,11 @@ sessionGlobals = globals . machineOf
 -- | The object-language grammars installed so far, latest first.
 sessionGrammars :: Session -> [Grammar]
 sessionGrammars = grammars . machineOf
+
+-- | __Where a reader of this session stands__ (MS12 phase 313), for spelling a
+-- name or a parser key the way the session would print it.
+sessionScope :: Session -> InScope
+sessionScope = scope . machineOf
 
 -- | The ordered rule bases.
 sessionRules :: Session -> [RuleBase]
@@ -230,6 +259,16 @@ developmentView budget s =
     (Just (route (sessionCursor s)))
     (rebuild (sessionCursor s))
 
+-- | Every goal left, flat, each with the word that reaches it.
+--
+-- **Derived from 'developmentView' and not from a walk of its own** — the types
+-- and addresses must be the ones the development view prints. 'Thena.View.Goals'
+-- says why, and @ViewTests@ pins the list against 'Thena.Engine.goalEnv', which
+-- is what the prompt actually binds: a pane offering a word the prompt does not
+-- bind would be the one way this can go wrong.
+goalsView :: Budget -> Session -> [GoalView]
+goalsView budget = goalsOf . developmentView budget
+
 -- | The running machine: its program, its bindings, and the calls underneath.
 machineView :: Budget -> Session -> MachineView
 machineView budget s =
@@ -242,6 +281,25 @@ machineView budget s =
     (sessionNames s)
     (focusAddress s)
     (machineOf s)
+
+-- | __The live choice points, nearest first__ — the same list @:choices@ prints,
+-- and the read a standalone choice-points pane is built on (his ruling,
+-- 2026-11-16).
+--
+-- **Nearest first is also the order @retry@ with no argument walks**, so a pane
+-- that draws the rows in the order they arrive is showing what the next bare
+-- @retry@ would take.
+--
+-- **It is empty except while a rule is running or standing in a @yield@**, and
+-- that is correct rather than a gap: choice points are discarded at a proof
+-- boundary (his ruling of 2026-09-03), so there is nothing to retry at a
+-- settled prompt. A pane that is blank until a rule pauses is the honest shape
+-- of the feature.
+--
+-- **No 'Budget'** — a 'ChoiceView' is an identifier and names, with no term in
+-- it to print to a depth. It is the only view here without one.
+choicesView :: Session -> [ChoiceView]
+choicesView s = map (displayChoice (spellingOf s)) (choicePoints (machineOf s))
 
 -- | The type the focus is expected to have, in the context it sits in — @:where@'s
 -- own \"type\" section, and a goal pane's whole content.
@@ -280,27 +338,49 @@ rulesView budget s =
   where
     declaredIn b r = lookup (globalString (ruleName r)) (baseSignatures b)
 
--- | The rules whose heads hold at the focus — the match list, the same one
--- @:matches@ prints.
--- **A matched rule's signature is looked up across the bases in order**
--- (MS7 phase 131), because 'matches' says which rule held and not which file it
--- came from. Definition order is dispatch order (@.claude\/spec\/machine.md@ §8), so the
--- first declaration of a name is the one a reader would mean.
-matchesView :: Budget -> Session -> [RuleView]
-matchesView budget s =
-  [ ruleOf budget s (declared r) r
-  | r <- drain (matches (sessionRules s) (sessionGlobals s) (sessionCursor s))
+-- | The rules that apply at the focus — the match list, the same one
+-- @:matches@ prints, **one entry per name and arity**.
+--
+-- **His ruling, 2026-11-19**: /"each rule-arity, in other words — each rule,
+-- gets to be represented by one entry. So I could have @foo\/2@ and @foo\/4@
+-- but never two @foo@s."/ This answered with one entry per clause until then,
+-- which made a name with twenty-two clauses twenty-two rows that no reader
+-- could tell apart and no command could act on. 'Thena.Rules.matchingRules'
+-- does the grouping and 'Thena.View.Matches.MatchView' is what a row carries.
+--
+-- **The type is inferred and not looked up by name.**
+-- 'Thena.Instral.Infer.inferProgram' is keyed by name and arity, which is
+-- exactly a row\'s key, so a name carrying two arities gets the right type for
+-- each — a lookup in 'baseSignatures', which is keyed by name alone, could not
+-- and was what this did before. It is also why a row always has one: inference
+-- answers for a rule whose file declared nothing, and a rule whose types do not
+-- work out never loads.
+--
+-- **The table is READ and not worked out** (MS12 phase 323).
+-- 'Thena.Engine.ruleTypes' is computed where the bases are installed and is a
+-- thunk until something asks, so a pane a frontend redraws on every keystroke
+-- pays nothing for it. It used to run 'Thena.Instral.Infer.inferProgram' here,
+-- per call, which measured 0.8 ms over the shipped base and grew with the
+-- bases.
+--
+-- **The clauses are not lost.** 'rulesView' is still per clause, which is what
+-- @:rules@ shows, and a pane that shows the clauses behind one of these rows is
+-- a feature of its own.
+-- **A READ-ONLY QUERY, so the counter it passes goes nowhere** (MS12).
+-- Matching threads the session's name counter (§7.6), and this hands it the
+-- session's and throws the answer away. That is sound because a display match
+-- binds nothing that is kept and this view names no value one bound: a row
+-- carries the group's parameter /patterns/ and the inferred type, never a term
+-- a match produced. §7.6's "autocomplete is a read-only query on this
+-- iterator" is the sentence this keeps true.
+matchesView :: Budget -> Session -> [MatchView]
+matchesView _ s =
+  [ displayMatch (spellingOf s) nm (groupParams grp) (lookup (nm, k) inferred)
+  | ((nm, k), grp) <- matchingRules (sessionRules s) (sessionGlobals s)
+                                    (names (machineOf s)) (sessionCursor s)
   ]
   where
-    declared r =
-      case [ sig | b <- sessionRules s
-                 , Just sig <- [lookup (globalString (ruleName r)) (baseSignatures b)] ] of
-        sig : _ -> Just sig
-        []      -> Nothing
-    drain :: RuleIter -> [Rule]
-    drain it = case next it of
-      Nothing        -> []
-      Just (r, rest) -> r : drain rest
+    inferred = ruleTypes (machineOf s)
 
 -- | What the development currently rests on that nothing derived, and the rung
 -- that decides whether @qed@ will accept it (MS8 phase 151).
@@ -322,9 +402,64 @@ trustView budget s =
     (sessionTrust s)
     (restsOn s)
 
+-- | __Why an item in a partly-loaded module did not finish__ (MS12 phase 325).
+--
+-- **The 'Thena.Driver.Unfinished' comes from the response that reported the
+-- module** — one of 'Thena.Driver.ProofLoadedPartly'\'s unfinished items — and
+-- not from the session, because a load's answer is said once and this view is
+-- of what it said. Everything a pane needs to lay it out is in
+-- 'Thena.View.Failure.StopView'; the session is here for the spelling, the
+-- grammars and the display names, as it is for every other view.
+--
+-- **IT TOOK THE 'NotDone' ALONE UNTIL MS12 PHASE 334** (@~hcr2d@). The item now
+-- also carries the line and column it was written at, and that is what makes a
+-- pane's row a place to go rather than a sentence — so the whole unfinished item
+-- comes in and 'Thena.View.Failure.stopViewAt' is where the position comes out.
+failureView :: Budget -> Session -> Unfinished -> StopView
+failureView budget s =
+  displayStop
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (envAt s)
+    (binderAddresses s)
+    (sessionNames s)
+    (focusAddress s)
+
+-- | __Why a rule file would not load__ (MS12 phase 348, @~cjznk@).
+--
+-- **The 'Thena.Driver.RuleFileError' comes out of the response that refused the
+-- file** — 'Thena.Driver.RuleFileRefused', or the one 'Thena.Files.Unloadable'
+-- wraps for a file walk — and not out of the session, for 'failureView'\'s
+-- reason: a load's answer is said once and this is the view of what it said.
+--
+-- **THE PATH IS THE ONE THAT RESPONSE CARRIED BESIDE THE ERROR** (MS12 phase
+-- 349, @~8w6qw@), and it is an argument because a reader's position is a
+-- position /in a file/ and the error does not hold one: @.thena.rules@ text is
+-- parsed by a function that is also given a file's contents out of a project,
+-- where there is no path at all ('Thena.Driver.rawRuleDecls'). A fault about a
+-- /clause/ still carries its own file, because two bases may hold a rule of one
+-- name; a file that would not parse is this file and no other.
+--
+-- **His ruling of 2026-11-24**, on whether a refusal of text the author is
+-- editing belongs to a pane of the session at all: it does, for the reason that
+-- decided the same question for a @language@ block two phases earlier
+-- (@~csndm@) — a rule file would otherwise be the one thing the author writes
+-- that the session refuses without telling a pane why.
+refusedFileView :: Budget -> Session -> FilePath -> RuleFileError -> StopView
+refusedFileView budget s =
+  displayRuleFile
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (envAt s)
+    (binderAddresses s)
+    (sessionNames s)
+    (focusAddress s)
+
 -- | Is this region one term of this language, and if not, why.
 parseView :: Session -> String -> Maybe String -> [Written] -> Either FailureView TreeView
-parseView s = displayParse (sessionGrammars s)
+parseView s = displayParse (sessionGrammars s) (sessionScope s)
 
 -- | What may be written at the cursor inside a region (phase 115e, given the
 -- shape an editor holds a region in at phase 125).
@@ -335,7 +470,7 @@ offerView
   -> [Written]
   -> [Written]
   -> Either OfferProblem OfferView
-offerView s = displayOffer (sessionGrammars s)
+offerView s = displayOffer (sessionGrammars s) (sessionScope s)
 
 -- | **What may be written at the cursor of an @instral@ line** — the prompt
 -- itself, not a region inside one (MS7 phase 137; Tier A of
@@ -354,8 +489,34 @@ offerView s = displayOffer (sessionGrammars s)
 --
 -- **Total, where 'offerView' can refuse.** There is no language name to get
 -- wrong: @instral@ is always in scope.
+-- | __What the session is holding and has put down__ (MS12 phase 310, his
+-- ruling of 2026-11-11: a pane on @:proofs@, held open at all
+-- times).
+--
+-- **One list and one word, his ruling**: a parked import is in it beside the
+-- proofs, under the name it was imported by, and a row is picked up by
+-- submitting @:resume ‹word›@ — never by anything here, because unparking is a
+-- step.
+--
+-- **It takes neither binders nor an address**, which every other view of a term
+-- does: a quest's statement is closed and belongs to a development the session
+-- is not standing in, so there is nothing of the focus to relate it to.
+-- "Thena.View.Proofs".'displayProofs' says why at length.
+proofsView :: Budget -> Session -> ProofsView
+proofsView budget s =
+  displayProofs
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (sessionNames s)
+    (currentQuest s)
+    (parked s)
+
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
-statementOfferView s = statementOffer (sessionGrammars s) (sessionRules s)
+statementOfferView s =
+  statementOffer (sessionGrammars s) (sessionGlobals s) (scope (machineOf s))
+                 (sessionRules s)
+                 (openableNamespaces s) (goalEnv (machineOf s))
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself
@@ -370,17 +531,11 @@ ruleOf budget s =
 globalString :: GlobalName -> String
 globalString = nameDotted
 
--- | Display names for the variables at the focus, freshened the way the chain
--- printer freshens a component's — 'Thena.Render.envOf's own fold, here because
--- a view must agree with it about what a variable is called.
+-- | The scope at the focus — 'Thena.Syntax.Print.scopeOf' over the focus's
+-- context, so a view cannot disagree with the terminal about what a variable is
+-- called or about which words are still live.
 envAt :: Session -> Env
-envAt = foldl add [] . sessionContext
-  where
-    add e entry =
-      let (v, hint) = case entry of
-            Hypothesis x (Ident h) _   -> (x, h)
-            Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+envAt = scopeOf . sessionContext
 
 route :: Cursor -> ([Step], Focus)
 route cur = (toList (prefix cur), focus cur)

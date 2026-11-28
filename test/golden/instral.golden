@@ -3,7 +3,7 @@ proving t : Type₀
 thena spine> m = concat "a" "b" ; say m
 ab
 thena spine> say m
-no parameter or earlier binding is called m
+nothing in this line binds m
 thena spine> n = 42 ; p = (1, true) ; l = [1, 2, 3] ; say "bound"
 bound
 thena spine> f = \ z -> concat z z ; r = f "q" ; say r
@@ -13,6 +13,7 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
+  any-of/1 : List a -> a   (rule)
   apply-all/2 : Core -> List Core -> Core   (rule)
   instantiate-with/2 : Core -> List Core -> Core   (rule)
   intro-arm-binders/6 : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core   (rule)
@@ -39,8 +40,8 @@ thena spine> :accepts Surface
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
 thena spine> do { attack }
 thena spine> :show
-▶ let ? t : Type₀ ≐ (
-    let ? t1 : Type₀ in
+  let ? t : Type₀ ≐ (
+▶   let ? t1 : Type₀ in
     t1
   ) in
   t

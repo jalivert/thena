@@ -13,7 +13,8 @@ a bare word acts, a word with a colon looks.
                                 descend into a field of the focused term
   arg ‹n› param ‹n› method ‹n› index ‹n›
                                 descend into a numbered field
-  goto-named "‹hole›"           move to a hole by name
+  goto ‹goal›                   move to a hole or guess by its name
+  goto-named "‹hole›"           search the development for that name
   goto-root                     move to the root of the development
   reduce                        reduce the focused term in place
   quantify "‹x›" core`‹S›`      add a ∀-binder above the focus
@@ -49,9 +50,9 @@ a bare word acts, a word with a colon looks.
   :run / :run ‹n›               let it run on / for n instructions
   :theorem ‹x› : ‹T›            start a proof
   :goal ‹T›                     discard everything and start a scratch goal
-  :suspend / :resume ‹name›     put a proof aside / take it up again
-  :proofs                       the current proof and the suspended ones
-  :abandon                      give up the current proof
+  :suspend / :resume ‹name›     put a proof or an import aside / take it up again
+  :proofs                       what is being worked on, and what is parked
+  :abandon                      give up what is being worked on
   :undo                         take back the last line
   :extract                      the term the development stands for
   :revalidate                   recheck the whole development

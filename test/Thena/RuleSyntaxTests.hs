@@ -12,6 +12,7 @@
 -- checks that what they say is a word the parser and resolver actually accept.
 module Thena.RuleSyntaxTests (tests) where
 
+import Data.List (isInfixOf, nub)
 import Data.Maybe (listToMaybe)
 
 import Test.Tasty (TestTree, testGroup)
@@ -25,15 +26,20 @@ import Thena.Instral.Ops
   , Instr (..)
   , Op (..)
   , Operand (..)
+  , Origin (..)
   , Rule (..)
   , Value (..)
   , opKeyword
   , partWords
   )
 import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Type (Ty (..))
+import Thena.Render (renderPattern)
+import Thena.Syntax.Print (componentPText)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError (..)
+  , faultWhy
   , allRules
   , opWords
   , resolveRule
@@ -43,8 +49,8 @@ import Thena.Rules
   , testWord
   , validate
   )
-import Thena.Standard (expectedStandard, standardBases)
-import Thena.Syntax.Lexer (Located, Token, lexTokens)
+import Thena.Standard (expectedStandard, forgetOrigins, standardBases)
+import Thena.Syntax.Lexer (Located, Pos (..), Token, lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Syntax.Parser (parseRule)
 
@@ -60,6 +66,7 @@ tests =
     , headOperands
     , regions
     , mistakes
+    , focusPatterns
     ]
 
 -- --------------------------------------------------------------------------
@@ -85,7 +92,7 @@ readRule src = case laidOut src of
   Left e -> Left e
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule (rootReading []) raw of
+    Right raw -> case resolveRule "test" (rootReading []) raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
@@ -94,7 +101,7 @@ expectRule src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule s
 
 -- | A rule whose body is the one instruction under test.
 bodyOf :: String -> IO [Instr]
-bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole do " ++ src)
+bodyOf src = ruleBody <$> expectRule ("rule r at ? _ : _ :- do " ++ src)
 
 -- | The head of a whole written rule (MS5 phase 64), where 'bodyOf' supplies one.
 headOf :: String -> IO [Test]
@@ -124,7 +131,27 @@ againstTheBase =
     , testCase "its rules are exactly the expected ones, in order" $ do
         rs <- allRules <$> standardBases
         map ruleName rs @?= map ruleName expectedStandard
-        rs @?= expectedStandard
+        -- **Origins dropped before the comparison** (MS12 phase 342): a clause
+        -- carries its file, line and column now, and 'expectedStandard' says
+        -- what the clauses ARE and deliberately not where they sit — pinning a
+        -- hundred line numbers here would redden this list every time a comment
+        -- is added to the file.
+        forgetOrigins rs @?= expectedStandard
+
+    , testCase "and every clause knows the file and the line it was written at" $ do
+        -- **The other half of the same phase, and it is what keeps the list
+        -- above from hiding a regression**: the comparison forgets origins, so
+        -- this is where the origins are asserted. Every clause of the shipped
+        -- base comes out of the base's own file at a line of its own — which is
+        -- what @:choices@ needs to tell two clauses of one name apart (@~mhz7j@).
+        bs <- standardBases
+        let rs' = concatMap baseRules bs
+            paths = map basePath bs
+        [ () | r <- rs', Nothing <- [ruleOrigin r] ] @?= []
+        [ () | r <- rs', Just o <- [ruleOrigin r]
+             , originPath o `notElem` paths ] @?= []
+        length (nub [ posLine (originAt o) | r <- rs', Just o <- [ruleOrigin r] ])
+          @?= length rs'
 
     , testCase "and every one of them validates" $ do
         rs <- allRules <$> standardBases
@@ -189,11 +216,15 @@ everyOp =
   , ("say x",        Say (Ref "x"))
   , ("concat x y",   Concat (Ref "x") (Ref "y"))
   , ("name-text x",  Op.NameText (Ref "x"))
+  , ("name-ident x", Op.NameIdent (Ref "x"))
+  , ("ident-term x", Op.IdentTerm (Ref "x"))
     -- **Both @goto@s, because they were one op until MS5 phase 66b** and a
     -- mirror that lists neither cannot notice a split.
   , ("goto x",       Goto (Ref "x"))
   , ("goto-named x", Op.GotoNamed (Ref "x"))
   , ("goto-root",   Op.GotoRoot)
+    -- The goal to work on next, worked out from the development (@~g3qnw@).
+  , ("next",        Op.NextGoal)
   , ("along",        Along)
   , ("into",         Into)
   , ("cross type",   CrossType)
@@ -239,8 +270,9 @@ everyOp =
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
-  , ("prim-prove",   Prove)
+  , ("prim-step",   Dispatch)
   , ("expand-implicits t", Op.ExpandImplicits (Ref "t"))
+  , ("record-implicits t", Op.RecordImplicits (Ref "t"))
   , ("app-head t", Op.AppHead (Ref "t"))
   , ("app-first-argument t", Op.AppFirstArgument (Ref "t"))
   , ("app-tail t", Op.AppTail (Ref "t"))
@@ -250,8 +282,15 @@ everyOp =
   , ("prim-apply x",  Op.Apply (Ref "x"))
   , ("goal",          Goal)
   , ("here",          Here)
+  , ("in-scope",      InScopeAt)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
+    -- Putting a body back under a binder (MS12 phase 356): the identifier
+    -- carries the token to abstract, and @make-let@ is the first op in the
+    -- language with four operands.
+  , ("make-forall x t e", Op.MakeForall (Ref "x") (Ref "t") (Ref "e"))
+  , ("make-lambda x t e", Op.MakeLambda (Ref "x") (Ref "t") (Ref "e"))
+  , ("make-let x v t e",  Op.MakeLet (Ref "x") (Ref "v") (Ref "t") (Ref "e"))
   , ("prepend x y",   Op.Prepend (Ref "x") (Ref "y"))
   , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
   , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))
@@ -331,6 +370,13 @@ everyOp =
   , ("tie-recursion t", Op.TieRecursion (Ref "t"))
     -- The binder report's accessor (MS9 phase 192).
   , ("binder-name b", Op.BinderName (Ref "b"))
+    -- Giving the binder at the focus a word (MS12 phase 330).
+  , ("prim-rename n", Op.Rename (Ref "n"))
+    -- The word the head's next argument position was declared with (MS12
+    -- phase 345).
+  , ("next-argument-name f", Op.NextArgumentName (Ref "f"))
+    -- All the arithmetic there is (MS12 phase 347).
+  , ("one-less n", Op.OneLess (Ref "n"))
   ]
 
 vocabulary :: TestTree
@@ -403,7 +449,7 @@ vocabulary =
 -- | **A head is a run of tests with nothing between them**, so a test taking
 -- operands is parenthesised and a bare word is a test of none. The ambiguity
 -- the brackets answer is the one the REPL's argument runs have, and it is
--- answered the same way: without them @when focus-is-hole goal-type-is-pi@
+-- answered the same way: without them @when goal-type-is-pi goal-type-is-let@
 -- reads as one test applied to another word.
 --
 -- **The existing spellings do not move**, which is why this shape and not
@@ -419,9 +465,9 @@ headOperands =
 
     , testCase "beside bare ones, in either order" $ do
         r <- expectRule
-               "rule r s :- when focus-is-hole (surface-is-name s) goal-type-is-pi \
+               "rule r s :- when goal-type-is-let (surface-is-name s) goal-type-is-pi \
                \do prim-solve"
-        ruleHead r @?= [FocusIsHole, SurfaceIsName (Ref "s"), GoalTypeIsPi]
+        ruleHead r @?= [GoalTypeIsLet, SurfaceIsName (Ref "s"), GoalTypeIsPi]
 
     , testCase "a literal is accepted where a name is" $ do
         r <- expectRule "rule r :- when (surface-is-name \"x\") do prim-solve"
@@ -432,7 +478,7 @@ headOperands =
       -- have come from.
       testCase "a head naming something that is not a parameter is refused" $ do
         r <- expectRule "rule r s :- when (surface-is-name q) do prim-solve"
-        validate r @?= [UnboundInHead (rootName "r") "q"]
+        map faultWhy (validate r) @?= [UnboundInHead (rootName "r") "q"]
 
     , testCase "and a parameter it does name is fine" $ do
         r <- expectRule "rule r s :- when (surface-is-name s) do prim-solve"
@@ -472,12 +518,12 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule "rule r :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule r at ? _ : _ :- do prim-solve"
         ruleParams r @?= []
     , -- **No parentheses and no commas** — corrected by the user 2026-08-25,
       -- so that a definition and a call site write their arguments alike.
       testCase "parameters are a bare run of names" $ do
-        r <- expectRule "rule r a b c :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule r a b c at ? _ : _ :- do prim-solve"
         ruleParams r @?= map Op.PVar ["a", "b", "c"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
@@ -493,7 +539,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule "rule elab-app :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule elab-app at ? _ : _ :- do prim-solve"
         ruleName r @?= rootName "elab-app"
     ]
 
@@ -542,12 +588,12 @@ text =
         b @?= [Do (Try (Lit (VText "not a term")))]
 
     , testCase "an unterminated string does not lex" $
-        case readRule "rule r :- when focus-is-hole do say \"oops" of
+        case readRule "rule r at ? _ : _ :- do say \"oops" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
 
     , testCase "a rule name is still a name, not text" $
-        case readRule "rule r :- when focus-is-hole do call \"try\" x" of
+        case readRule "rule r at ? _ : _ :- do call \"try\" x" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
     ]
@@ -610,7 +656,7 @@ regions =
       Bind _ _ o -> opKeyword o
       Do o     -> opKeyword o
 
-    errs src = readErrors ("rule r :- when focus-is-hole do " ++ src)
+    errs src = readErrors ("rule r at ? _ : _ :- do " ++ src)
 
     headErrs src = readErrors ("rule r :- when " ++ src ++ " do prim-solve")
 
@@ -618,8 +664,10 @@ regions =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule (rootReading []) raw of
-          Left es -> Just es
+        Right raw -> case resolveRule "test" (rootReading []) raw of
+          -- **The place each fault carries is "Thena.ViewTests"' subject** and
+          -- these cases are about which fault (MS12 phase 349).
+          Left es -> Just (map faultWhy es)
           Right _ -> Nothing
 
 mistakes :: TestTree
@@ -717,7 +765,7 @@ mistakes =
       -- numeral is an 'Op.VInt' as of MS5 phase 64, so @prim-try 3@ resolves
       -- and fails when it runs.
       refused "an operand no reading of the word admits"
-        "rule r :- when focus-is-hole do cross body"
+        "rule r at ? _ : _ :- do cross body"
         [BadOperands (rootName "r") 0 "cross"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
       --
@@ -727,7 +775,7 @@ mistakes =
       -- back as @DeclarationInBody@, which is why 'validate''s own check has
       -- been reachable only for a rule built in Haskell since before that.
       testCase "a declaration in a body" $
-        case laidOut "rule r :- when focus-is-hole do data" of
+        case laidOut "rule r at ? _ : _ :- do data" of
           Left _  -> pure ()
           Right ts -> case parseRule ts of
             Left _  -> pure ()
@@ -738,7 +786,7 @@ mistakes =
         , BadOperands (rootName "r") 1 "cross"
         ]
     , testCase "a body is required" $
-        case readRule "rule r :- when focus-is-hole" of
+        case readRule "rule r at ? _ : _ :-" of
           Left _  -> pure ()
           Right r -> assertFailure ("parsed: " ++ show r)
     ]
@@ -752,6 +800,147 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule (rootReading []) raw of
-          Left es -> Just es
+        Right raw -> case resolveRule "test" (rootReading []) raw of
+          -- **The place each fault carries is "Thena.ViewTests"' subject** and
+          -- these cases are about which fault (MS12 phase 349).
+          Left es -> Just (map faultWhy es)
           Right _ -> Nothing
+
+-- --------------------------------------------------------------------------
+-- The focus as a pattern (MS12 phase 358, `~9j34x`)
+-- --------------------------------------------------------------------------
+
+-- | __@at@, and the five development components after it__ — his framing of
+-- 2026-09-14, /@at@ names the subject and the tag names the language/.
+--
+-- **Read back and not merely parsed**, which is this file's standing rule after
+-- @ms5\/CLOSEOUT.md@ 26: 'Thena.Syntax.Print.componentPText' prints what the
+-- grammar takes, so every spelling below parses to the pattern it came from.
+focusPatterns :: TestTree
+focusPatterns =
+  testGroup
+    "the focus, via at"
+    [ testGroup "every component form reads back" (map formCase everyForm)
+
+      -- **A clause that wrote no @at@ asks nothing about the focus**, which
+      -- every rule that is a function does — and since his ruling of
+      -- 2026-11-27 (@~9m27n@) that is the only reason to write none, @at _@
+      -- being the spelling for /any/ component.
+    , testCase "a clause with no at has no focus pattern" $ do
+        r <- expectRule "rule r :- when goal-type-is-pi do attack"
+        ruleFocus r @?= Nothing
+
+      -- **@at _@ names no shape and binds nothing** — what
+      -- @focus-is-component@ was, his ruling of 2026-11-27 (@~9m27n@), and the
+      -- five clauses that asked that test now write it.
+    , testCase "a bare pattern after at is any component" $ do
+        r <- expectRule "rule r :- do attack"
+        ruleFocus r @?= Nothing
+        r' <- expectRule "rule r at _ :- do attack"
+        ruleFocus r' @?= Just (Op.CompAny Op.PWild)
+
+      -- …and it is a pattern like any other there, so a word binds the
+      -- component's own identity and the body may spend it.
+    , testCase "and a word there binds the focused component's identity" $ do
+        r <- expectRule "rule r at x :- do prim-rename x"
+        ruleFocus r @?= Just (Op.CompAny (Op.PVar "x"))
+        validate r @?= []
+
+      -- **A definition is still a definition**, which is the one state where a
+      -- lone pattern and a longer form compete: one token of lookahead decides
+      -- it, and @happy@ reports 0 conflicts.
+    , testCase "and at x = v : s is still the definition form" $ do
+        r <- expectRule "rule r at x = v : s :- do say v"
+        ruleFocus r
+          @?= Just (Op.CompDefine (Op.PVar "x") (Op.PVar "v") (Op.PVar "s"))
+
+      -- **A bare word in a position BINDS**, which is the difference between
+      -- this notation and a @core\`…\`@ region: the text after @at@ is the rule
+      -- language, so there is no escape to need.
+    , testCase "a word in a position binds, and the body may read it" $ do
+        r <- expectRule "rule r at ? h : s :- do say s"
+        validate r @?= []
+
+      -- …and the negative, so the case above is not passing for want of a
+      -- check: a name nothing bound is still refused in that body.
+    , testCase "and a name nothing bound is still refused there" $ do
+        r <- expectRule "rule r at ? h : s :- do say nosuch"
+        map faultWhy (validate r)
+          @?= [UnboundInRule (rootName "r") 0 "nosuch" TString]
+
+      -- **And a core pattern stands where a term stands**, which is the whole
+      -- point of the landing: the focus's type is taken apart in the head.
+    , testCase "a core pattern stands at a type position" $ do
+        r <- expectRule
+               "rule r at ? h : core`∀ (${x} : ${T}) -> ${E}` :- do say \"hi\""
+        ruleFocus r
+          @?= Just (Op.CompClaim (Op.PVar "h")
+                      (Op.PCore (Op.CPPi (Op.PVar "x")
+                                         (Op.CPHole (Op.PVar "T"))
+                                         (Op.CPHole (Op.PVar "E")))))
+
+      -- **The parameters and then the focus**, in writing order, which is the
+      -- order 'Thena.Instral.Ops.matchHead' matches them in.
+    , testCase "the parameters come first and the focus after them" $ do
+        r <- expectRule "rule r a b at ? h : s :- do say s"
+        (ruleParams r, ruleFocus r)
+          @?= ( [Op.PVar "a", Op.PVar "b"]
+              , Just (Op.CompClaim (Op.PVar "h") (Op.PVar "s"))
+              )
+
+      -- **A guess's @≐@ takes @_@ and nothing else** — what stands there is a
+      -- development and not a term, and @Development@ has no introduction form
+      -- until an op produces one (his ruling of 2026-09-11).
+    , testCase "a guess's ≐ takes _" $ do
+        r <- expectRule "rule r at ? h ≐ _ : s :- do say s"
+        ruleFocus r @?= Just (Op.CompGuess (Op.PVar "h") (Op.PVar "s"))
+
+    , testCase "and a name there is refused, naming what was written" $
+        case readRule "rule r at ? h ≐ g : s :- do say s" of
+          Left e | "FocusPatternForm" `isInfixOf` e -> pure ()
+          other -> assertFailure (show other)
+
+      -- **@at@ is a reserved word now** (@~86bnn@, his ruling of 2026-11-26),
+      -- so it cannot be a parameter — which is the cost the reservation buys
+      -- and the reason the marker is unambiguous.
+    , testCase "at cannot be a parameter name" $
+        case readRule "rule r at :- do attack" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "at parsed as a parameter"
+
+      -- **A word that merely contains it is untouched**, because a keyword rule
+      -- can only win on a whole token.
+    , testCase "a word containing at is an ordinary name" $ do
+        r <- expectRule "rule r atom :- do say atom"
+        ruleParams r @?= [Op.PVar "atom"]
+    ]
+
+-- | One component form, written, and the pattern it reads as.
+everyForm :: [(String, Op.ComponentP)]
+everyForm =
+  [ ("λ x : s",       Op.CompAssume   (Op.PVar "x") (Op.PVar "s"))
+  , ("x = v : s",     Op.CompDefine   (Op.PVar "x") (Op.PVar "v") (Op.PVar "s"))
+  , ("? x : s",       Op.CompClaim    (Op.PVar "x") (Op.PVar "s"))
+  , ("? x ≐ _ : s",   Op.CompGuess    (Op.PVar "x") (Op.PVar "s"))
+  , ("∀ x : s",       Op.CompQuantify (Op.PVar "x") (Op.PVar "s"))
+  -- **The sixth form, which names no shape** — his ruling of 2026-11-27.
+  , ("x",             Op.CompAny      (Op.PVar "x"))
+  -- **A region at a type position, and a wildcard binder** — the one form that
+  -- shows the two notations nested, with nothing to resolve: a universe needs
+  -- no global in scope where a bare word in a region would.
+  , ("? _ : core`Type₀`", Op.CompClaim Op.PWild (Op.PCore (Op.CPUniverse 0)))
+  ]
+
+formCase :: (String, Op.ComponentP) -> TestTree
+formCase (src, want) =
+  testCase src $ do
+    r <- expectRule ("rule r at " ++ src ++ " :- do attack")
+    ruleFocus r @?= Just want
+    -- …and the printed form parses to the same pattern again.
+    r' <- expectRule
+            ("rule r at " ++ componentPText patternSource want ++ " :- do attack")
+    ruleFocus r' @?= Just want
+
+-- | A pattern as a rule file writes it — enough for the forms above.
+patternSource :: Op.Pattern -> String
+patternSource = renderPattern

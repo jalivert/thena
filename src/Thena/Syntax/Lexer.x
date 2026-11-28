@@ -36,15 +36,24 @@ $upper  = [A-Z]
 -- stay reserved — @.claude\/spec\/interface.md@ said this set would have to
 -- shrink when the alias went, and this is it shrinking.
 --
--- **@⌜ ⌝@ spell nothing either and DO stay**, which is the one exception and it
--- is load-bearing: @Thena.Driver.resolving@ hoists a written core term into a
--- binding it names @⌜1⌝@, and that name is safe only because no identifier may
--- hold a corner. The notation they used to spell is gone with the alias.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+-- **@⌜ ⌝@ LEFT IT TOO, AT MS12 PHASE 335** (`~6rfwp`, his ruling of 2026-11-21),
+-- which is the same rule reaching the last two characters it had not. They had
+-- outlived the @⌜ t ⌝@ spelling by one phase for one reason:
+-- @Thena.Driver.resolving@ hoists a written core term into a binding of its own
+-- and that binding's name has to be one no rule body can write. **It is spelled
+-- @\'1@ now, and a quote is an @$idchar@ and not an @$idstart@** — so no written
+-- word can begin with one, which is all the hoist ever needed. The guarantee
+-- changed shape rather than weakening: it was /this character is unusable
+-- anywhere/ and it is /a word cannot begin with this character/.
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
 -- whitespace.
+--
+-- **@\'@ is in @$idchar@ and not in @$idstart@**, so @t\'@ and @t\'\'@ are
+-- ordinary names and @\'1@ is not a word at all. That asymmetry is what
+-- @Thena.Driver.resolving@'s hoisted binding stands on since phase 335.
 $idstart = [$lower $upper \_ \x80-\x10ffff] # $reserved
 $idchar  = [\x21-\x10ffff] # $reserved
 
@@ -278,6 +287,22 @@ tokens :-
   -- be written above it.
   "notation"    { keyword TNotation }
   "when"        { keyword TWhen }
+  -- **THE TWENTY-EIGHTH WORD, MS12 phase 358 — his ruling of 2026-11-26,
+  -- @~86bnn@.** @at@ marks the focus pattern in a rule head (his framing of
+  -- 2026-09-14: /@at@ names the subject and the tag names the language/), and a
+  -- notation cannot exist without a token — the argument @trusted@, @induction@
+  -- and @case@ were reserved on. **Measured, and it is why the word had to be
+  -- taken**: a component's definition form @at x = v : S@ begins with a name,
+  -- so with the marker left an ordinary identifier the grammar has eight
+  -- shift\/reduce conflicts where it has none with this token.
+  --
+  -- **It narrows identifiers project-wide**, as every word here does, and
+  -- nothing written in either repository used it as a name. **What did use it
+  -- was the system itself**: "Thena.Tactics.Eliminate" and
+  -- "Thena.Tactics.Specialise" minted a binder spelled @at@ until this phase
+  -- renamed it @carried@, which would have made them print a term this lexer
+  -- can no longer read.
+  "at"          { keyword TAt }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
@@ -305,7 +330,15 @@ tokens :-
 {
 
 -- | A source position: line and column, both counting from 1.
-data Pos = Pos !Int !Int
+--
+-- **The fields are named since MS12 phase 334** (@~hcr2d@), where a position
+-- first had to leave the parser: it rides on 'Thena.Driver.Unfinished' and out
+-- to a pane, and a frontend asking which @Int@ is the line by counting
+-- constructor arguments is how a row ends up pointing at a column.
+data Pos = Pos
+  { posLine   :: !Int
+  , posColumn :: !Int
+  }
   deriving (Eq, Show)
 
 -- | A token and where it was written.
@@ -385,6 +418,7 @@ data Token
     -- as raw text (MS6 phase 101, @ms6\/SPEC.md@ §7.0). Only 'lexModule'
     -- produces one; see 'blockText'.
   | TWhen
+  | TAt          -- ^ @rule r at ? x : S :- …@ (MS12 phase 358, @~86bnn@)
   | TNeck
   | TNumber Integer
   | TString String

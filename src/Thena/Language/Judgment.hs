@@ -59,6 +59,7 @@ import Thena.Language.Grammar
   , earleyRules
   , classOwner
   , classWord
+  , classIn
   , classesSubstituted
   , substitutionNames
   , variableProductions
@@ -129,9 +130,22 @@ constructor gs g r = do
     [] -> Right ()
   -- The quantified metavariables: written, or implicit in order of first
   -- appearance (§6.2), each at its language's type or its class's.
+  --
+  -- **THEY ARE IMPLICIT ARGUMENTS OF THE CONSTRUCTOR — MS12 PHASE 320, HIS
+  -- OBSERVATION OF 2026-10-09 (`~td9j6`).** A rule's metavariables are
+  -- implicitly quantified: that is what the notation means, and it is why they
+  -- are the ones a derivation should not have to repeat. Every one of them is
+  -- determined by the premises and the conclusion, so
+  -- @T-abs Ctx`·` "z" base LC`z` base (T-var …)@ is now @T-abs (T-var …)@.
+  --
+  -- **Written or inferred makes no difference**: a rule's @∀@ /lists/ its
+  -- metavariables and is not a nested scope (see 'QuantifiedTwice' below), so
+  -- a paren there is not a second spelling with another meaning — the plicity
+  -- is the block's, not the author's. **The premises stay explicit**: a
+  -- derivation is written by giving its sub-derivations and nothing else.
   (quantified, renaming) <- case ruleQuantifier r of
     Just q -> do
-      bs <- telescope q
+      bs <- map implicitly <$> telescope q
       let bound = [ x | SurfaceBinder _ x _ <- bs ]
       -- A rule's @∀@ lists its metavariables; it is not a nested scope, so a
       -- name bound twice is a mistake rather than a shadowing.
@@ -156,7 +170,7 @@ constructor gs g r = do
           fresh used x | x `elem` avoid || x `elem` used = fresh used (x ++ "'")
                        | otherwise = x
           renamed = go [] mentioned
-       in Right ( [ SurfaceBinder Explicit x' (Just (SurfaceName [] t)) | (_, x', t) <- renamed ]
+       in Right ( [ SurfaceBinder Implicit x' (Just (SurfaceName [] t)) | (_, x', t) <- renamed ]
                 , \x -> case [ x' | (y, x', _) <- renamed, y == x ] of
                     x' : _ -> x'
                     [] -> x )
@@ -178,6 +192,33 @@ constructor gs g r = do
         b : bs -> SurfacePi (b NE.:| bs) result
   Right (SurfaceConstructor [] (ruleName r) ty, replicate (length binders) Plain)
   where
+    -- **A WRITTEN @∀@ MAY BIND A PREMISE, AND A PREMISE STAYS EXPLICIT** (MS12
+    -- phase 320). @H-step@ in @examples/Stlc06MoreJudgments.thena@ is the case:
+    -- @∀ (M M' : LC) (s : step M M') ->@ binds the step itself, which the rule
+    -- text above the bar never mentions, and a derivation is not something
+    -- unification can find — it is the proof the author is writing.
+    --
+    -- **A premise is a binder at some judgment's statement**, which is the test
+    -- 'Thena.Render.renderRules' already answers @:rules@ with (MS8 phase 174):
+    -- a judgment is a grammar with a type-forming production, and nothing here
+    -- asks which kind of block declared it.
+    implicitly b@(SurfaceBinder _ x ty)
+      | maybe False statement ty = b
+      | otherwise                = SurfaceBinder Implicit x ty
+
+    -- The written type's head, against the grammars in scope. Both spellings
+    -- are read: the application @step M M'@ and the literal
+    -- @step\`${M} --> ${M'}\`@, which is the same statement in the judgment's
+    -- own notation.
+    statement t = case t of
+      SurfaceName _ w             -> judges w
+      SurfaceApp (SurfaceName _ w) _ -> judges w
+      SurfaceObject w _ _         -> judges w
+      _                           -> False
+
+    judges w =
+      or [ not (null (typeFormerProductions h)) | h <- gs, grammarWord h == w ]
+
     -- **The word, not the key** (MS10 phase 258): this is written into a
     -- surface type, and a block inside @namespace A@ writes @typing@.
     judgment = grammarWord g
@@ -498,7 +539,15 @@ ruleGrammar gs =
     own g =
       let l = grammarKey g
        in Earley.Rule ("metavariable " ++ l) l
-            [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
+            -- **THE RULE IS KEYED BY THE NAME AND THE SCAN IS LABELLED BY THE
+            -- WORD — MS12 phase 313.** The rule's name is read back by
+            -- 'Special' and must stay the key; the scan's name is only ever
+            -- printed, in @expecting a metavariable of Ctx@, and a module's
+            -- declarations live under the module's own name from this phase, so
+            -- the key there read @a metavariable of J.Ctx@ for a language the
+            -- author of the rule writes @Ctx@.
+            [ Earley.Scan ("a metavariable of " ++ grammarWord g)
+                          (metavariables (grammarMetavars g)) ] []
             : case classesSubstituted gs g of
                 [] -> []
                 cs ->
@@ -541,7 +590,17 @@ ruleGrammar gs =
                     : concat
                         [ [ Earley.Rule nm (pairNT l) body []
                           , Earley.Rule nm (pairNT l)
-                              (Earley.Literal (nameDotted c) : Earley.Literal ":" : body) []
+                              -- **The class is named relative to the language
+                              -- — MS12 phase 313** ('classIn'): the whole name
+                              -- carries the module's namespace, which the
+                              -- language in front of the bracket has already
+                              -- said, so this wanted @E[J.x: x -> M]@ while the
+                              -- generated notation for the one-pair form wanted
+                              -- @E[x: x -> M]@. **The rule's NAME stays whole**
+                              -- — it is what says which map the pair belongs
+                              -- in, and it is read back by 'Special'.
+                              ( Earley.Literal (nameDotted (classIn g c))
+                                  : Earley.Literal ":" : body ) []
                           ]
                         | c <- cs
                         , let nm = "pair " ++ l ++ " " ++ nameDotted c

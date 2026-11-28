@@ -1,0 +1,26 @@
+-- **A file no module name reaches, whose elaboration stops at a yield** (MS12
+-- phase 337, `~hdzp7`). The name begins with a digit, so it is no step of a
+-- module name and the file can only be reached by its path — which is the one
+-- case `finishingImport` had nothing to open for the prompt, while a load that
+-- went in in one go opened the header's namespace.
+--
+-- It consults the pausing base itself, so the placeholder yields however the
+-- session's own pool stands.
+
+module Unpaused where
+
+consult test.modules.Pausing
+
+data Two : Type₀ where
+  this : Two
+  that : Two
+
+open Two
+
+picked : Two
+picked = _
+
+-- Written after the yield: the declaration the resumed walk lands, and the one
+-- a prompt could not write.
+stands : Two
+stands = that

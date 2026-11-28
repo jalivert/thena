@@ -2,6 +2,7 @@
 module Thena.Development.Component
   ( Component (..)
   , forget
+  , renamed
   ) where
 
 import Thena.Core.Context (Entry (..))
@@ -47,6 +48,26 @@ data Component
     -- when solving — left the development transiently claiming a λ at a
     -- universe.
   deriving (Eq, Show)
+
+-- | The same component under a different word — the whole of what @rename@
+-- does to the development (MS12 phase 330).
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/, part
+-- four: a rename gives a binder a free word **permanently and in the term**,
+-- and it replaces the printer's rename, which existed only on screen. The word
+-- is the only field that moves: the variable is the identity, so nothing that
+-- points at this binder has to be touched and no proof changes.
+--
+-- **It is not asked whether the new word is free.** Any word is allowed — his
+-- second principle, and a taken one simply makes another dead binder and warns,
+-- exactly as writing it at @intro@ would.
+renamed :: Ident -> Component -> Component
+renamed i c = case c of
+  Assume   x _ s     -> Assume   x i s
+  Define   x _ v s   -> Define   x i v s
+  Claim    x _ s     -> Claim    x i s
+  Guess    x _ g s   -> Guess    x i g s
+  Quantify x _ s     -> Quantify x i s
 
 -- | McBride's forgetful view, printed p. 28 (§3.2).
 --

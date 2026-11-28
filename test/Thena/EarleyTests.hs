@@ -20,7 +20,7 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (Gen, Property, choose, counterexample, elements, forAll, oneof, sized, testProperty, withNumTests, (===))
 
-import Thena.Driver (loadProofSource)
+import Thena.Driver (Leniency (..), loadProofSource)
 import Thena.Language.Earley
 import Thena.Language.Regex (Regex, parseRegex)
 import Thena.Render (renderTrouble)
@@ -39,7 +39,7 @@ tests =
     , testGroup "Tab at the cursor (phase 102b)" tabbing
     , goldenVsString "parsing" "test/golden/parsing.golden" $ do
         (s0, trouble) <- startingSession
-        let (s1, _) = loadProofSource s0 stlc
+        let (s1, _) = loadProofSource Strict s0 stlc
         pure (toLazyByteString (stringUtf8
           (unlines (concatMap (renderTrouble s0) trouble) ++ transcriptFrom s1 prompt)))
     ]

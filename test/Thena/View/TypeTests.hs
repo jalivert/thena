@@ -18,7 +18,9 @@
 -- would be green without ever building a fence. The rule bases are still
 -- crossed, because they are what a frontend actually receives; they are just
 -- not what proves the fencing.
-module Thena.View.TypeTests (tests) where
+-- 'redrawSignature' is exported for @Thena.ViewTests@, whose @:matches@ cross
+-- needs the same rebuild: one redraw, so the two checks cannot drift.
+module Thena.View.TypeTests (tests, redrawSignature) where
 
 import Data.List (intercalate, nub)
 import Test.Tasty (TestTree, testGroup)
@@ -69,6 +71,7 @@ redrawType :: TypeView -> String
 redrawType v = case v of
   AString        -> "String"
   AName          -> "Name"
+  AnIdent        -> "Ident"
   AnInt          -> "Int"
   AChar          -> "Char"
   ABool          -> "Bool"
@@ -241,7 +244,7 @@ asParameter t = Signature [t, TCore] (Just t)
 
 handBuilt :: [Ty]
 handBuilt =
-      [ TString, TName, TInt, TChar, TBool
+      [ TString, TName, TIdent, TInt, TChar, TBool
       , TSurface, TCore, TDevelopment, TLevel
       , TVar 0, TVar 25, TVar 26, TVar 51
       , TList TCore

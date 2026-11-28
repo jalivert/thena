@@ -59,12 +59,15 @@ module Thena.Declared
   , eqStepCounter
   , declared
   , declaredAs
+  , declaredUnder
+  , resolvedIn
   , named
   ) where
 
 import Data.List (nub)
 
-import Thena.Core.Term (GlobalName (..), InScope, nameFromText, nameSteps, openingOnly, rootScope)
+import Thena.Core.Term (GlobalName (..), InScope, globalUnder, nameFromText, nameSteps, openingOnly, rootScope)
+import Thena.Engine (Machine, knownTo, scope)
 import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals, inductives)
@@ -283,8 +286,16 @@ declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, rootScope) srcs in
 -- that declares with 'declared' and then resolves a term written in short names
 -- passes @opensIn env@ where a REPL session passes @opened machine@ and a module
 -- passes the @open@s it has read.
+-- **AND EVERY PREFIX OF ONE, SINCE MS12 PHASE 313.** A module's declarations
+-- live under the name its header gives it, so a datatype of @module Printing
+-- where@ is @Printing.Ex.Ex@ — and a reader who writes the tag @Ex@ needs
+-- @Printing@ open, not only @Printing.Ex@. A session that loaded the module has
+-- exactly that; this is the same thing for a test that built its environment by
+-- hand, and for one that loaded a module and then resolves a term against it.
 opensIn :: GlobalEnv -> InScope
-opensIn e = openingOnly (reverse (nub [ nameSteps g | (g, _) <- inductives e ]))
+opensIn e =
+  openingOnly (reverse (nub (concatMap (prefixes . nameSteps . fst) (inductives e))))
+  where prefixes ps = [ take k ps | k <- [1 .. length ps] ]
 
 nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])
@@ -419,3 +430,27 @@ named = nameFromText
 -- namespace, so the fact is spelled once here instead of at each lookup.
 declaredAs :: String -> GlobalName
 declaredAs d = GlobalName [d] d
+
+-- | __The same, for a datatype a module declared__ (MS12 phase 313).
+--
+-- A module's declarations live under the name its header gives it, so @LC@ in
+-- @module STLC where@ is @STLC.LC.LC@: the module's steps, then the datatype's
+-- own namespace, then its word.
+declaredUnder :: String -> String -> GlobalName
+declaredUnder m d = case named (m ++ "." ++ d) of
+  GlobalName ps w -> GlobalName (ps ++ [w]) w
+
+-- | __The name a word means in this machine__ (MS12 phase 313).
+--
+-- **What a user would write, resolved the way the system resolves it.** A
+-- module's declarations live under its own namespace since that phase, so a
+-- test that looked a definition up by @rootName@ was asking for a key nothing
+-- holds — while the session that loaded the file has the module open, so the
+-- word the file wrote still means the declaration. 'Thena.Core.Term.globalUnder'
+-- is the one walk, asked here rather than reasoned about.
+--
+-- 'Nothing' when nothing answers, or when two things do.
+resolvedIn :: Machine -> String -> Maybe GlobalName
+resolvedIn m n = case globalUnder (knownTo m) (scope m) (named n) of
+  Right g -> Just g
+  Left _  -> Nothing

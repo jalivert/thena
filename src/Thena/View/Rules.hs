@@ -19,7 +19,8 @@ module Thena.View.Rules
   ) where
 
 import Thena.Core.Term (Spelling, Var, spelledIn)
-import Thena.Instral.Ops (Rule (..), Test)
+import Thena.Instral.Ops (Origin (..), Rule (..), Test)
+import Thena.Syntax.Lexer (Pos)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address)
@@ -28,7 +29,7 @@ import Thena.View.Instral (OperandView, StatementView, displayBlock, displayOper
 import Thena.Rules (testOperands, testWord)
 import Thena.Instral.Type (Signature)
 import Thena.View.Type (SignatureView, displaySignature)
-import Thena.Syntax.Print (Env)
+import Thena.Syntax.Print (Env, componentPText)
 
 -- | A rule's name, its head, its params as `:matches`' own placeholders, and
 -- its body as 115d's statements — a rule's body is never a live @pc@, so
@@ -37,6 +38,20 @@ data RuleView = RuleView
   { ruleViewName      :: String
   , ruleViewHead      :: [TestView]
   , ruleViewParams    :: [String]
+  , ruleViewFocus     :: Maybe String
+    -- ^ __the clause's @at@ pattern, as written__ (MS12 phase 358, @~9j34x@;
+    -- his framing of 2026-09-14) — one of the five development components with
+    -- a pattern at each position, in @spec\/machine.md@ §3.2's notation and
+    -- with no fence (his ruling of 2026-09-13).
+    --
+    -- **A 'String' for the reason 'ruleViewParams' is one**: what a pane draws
+    -- here is the line the author wrote, and 'Thena.Syntax.Print.componentPText'
+    -- is a spelling that reads back, so a reader who copies it has a line the
+    -- grammar takes. A structured shape would be a second description of the
+    -- development calculus's notation for a pane that draws it as text.
+    --
+    -- **'Nothing' is a clause that asks nothing about the focus**, which is
+    -- every clause written before this phase.
   , ruleViewBody      :: [StatementView]
   , ruleViewSignature :: Maybe SignatureView
     -- ^ **the type its rule file declared for the name** (MS5 phase 67), as
@@ -52,6 +67,25 @@ data RuleView = RuleView
     -- the confusion the literal alternative costs nothing to avoid, and
     -- "Thena.View.TypeTests" rebuilds the rendered form from this one byte for
     -- byte, so nothing is lost by dropping it.
+  , ruleViewPath      :: Maybe FilePath
+    -- ^ __the file this clause was written in__ (MS12 phase 343, @~zx8cb@).
+  , ruleViewAt        :: Maybe Pos
+    -- ^ __the line and column it begins at__ (MS12 phase 343, @~zx8cb@), so a
+    -- pane of a rule's clauses can open one.
+    --
+    -- **A row of this view /is/ one clause**, which is why the position belongs
+    -- here and not on 'Thena.View.Matches.MatchView': a match row stands for
+    -- every clause of a name and arity (his ruling, 2026-11-19), and a group has
+    -- no one place it is written at. A pane that shows the clauses behind a row
+    -- gets them from here, and that is the pane this was missing for.
+    --
+    -- **The same two fields and the same meaning as
+    -- 'Thena.View.Choices.AltView'**, which phase 342 gave the choice-point
+    -- pane: a clause is a destination or it is nowhere, and a frontend should
+    -- not have to learn a second shape for it depending on which pane it is
+    -- drawing. 'Nothing' is a clause in no file — the synthetic @entry@ and @do@
+    -- rules a typed line is wrapped in — and a clause a base read always has
+    -- both ('Thena.Instral.Ops.ruleOrigin').
   }
   deriving (Eq, Show)
 
@@ -76,8 +110,11 @@ displayRule sp gs budget env bs n at sig r =
     (nameOf (ruleName r))
     (map test (ruleHead r))
     (map placeholder (ruleParams r))
+    (componentPText placeholder <$> ruleFocus r)
     (displayBlock sp gs budget env bs n at Nothing (ruleBody r))
     (fmap displaySignature sig)
+    (originPath <$> ruleOrigin r)
+    (originAt <$> ruleOrigin r)
   where
     nameOf = spelledIn sp
     placeholder pt = case pt of

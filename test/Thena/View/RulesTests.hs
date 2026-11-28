@@ -2,7 +2,7 @@
 -- and 115i).
 --
 -- **The crossing, in three already-proven pieces.** The name and params
--- cross against 'Thena.Render.renderMatches' — the same line
+-- cross against 'Thena.Render.renderRuleClause' — the same line
 -- @:matches@\/@:rules@ show. The body reuses 115d's own
 -- 'redrawStatement'\/'redrawOperand'\/'redrawSkeleton'\/'redrawValue'.
 -- **The head (115i) crosses each test's word against 'Thena.Rules.testWord'
@@ -14,7 +14,7 @@
 -- own rules, not a hand-built sample.
 module Thena.View.RulesTests (tests) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, isPrefixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
@@ -36,12 +36,13 @@ import Thena.View.Instral
   , ValueView (..)
   )
 import Thena.View.Redraw (redraw, redrawSurface)
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.View.Rules (RuleView (..), TestView (..), displayRule)
 import Thena.Files (startingSession)
 import Thena.Render
   ( rendering
   , rendering
-  ,renderInstr, renderMatches, renderOperand)
+  ,renderInstr, renderRuleClause, renderOperand)
 import Thena.Rules (RuleBase (..), allRules, testOperands, testWord)
 
 tests :: TestTree
@@ -53,6 +54,8 @@ tests =
     , testCase "and the corpus really holds head tests" headsNotVacuous
     , testCase "a rule's declared type reaches the view it is in" declaredTypes
     , testCase "and the shipped base really declares types" declaredTypesNotVacuous
+    , testCase "a clause's position reaches the view, and it is the clause's own line"
+        clausePositions
     ]
 
 corpusOf :: IO [Rule]
@@ -83,6 +86,51 @@ declaredTypes = do
     e : _ -> assertFailure e
   where
     nameOf = nameDotted . ruleName
+
+-- | __The position crossing__ (MS12 phase 343, @~zx8cb@).
+--
+-- **Against the file and not against the record it came from.** Reading
+-- 'Thena.Instral.Ops.ruleOrigin' back out of the same 'Rule' the view was built
+-- from would pass whatever the parser put there, off-by-one included. So this
+-- opens the file the row names, takes the line it names, and asks whether the
+-- clause really begins there: from the column, a rule reads @rule@ and anything
+-- else reads its own name. A row with no position is counted and refused
+-- separately — every clause the shipped base read has one.
+clausePositions :: IO ()
+clausePositions = do
+  s <- fst <$> startingSession
+  let bs = rules (machineOf s)
+      rows =
+        [ (r, rv)
+        | b  <- bs
+        , (r, rv) <- zip (baseRules b) (concat [ vs | (n, vs) <- rulesView (Budget 200) s
+                                                    , n == baseName b ])
+        ]
+  wrong <- concat <$> traverse checked rows
+  case wrong of
+    e : _ -> assertFailure e
+    -- **A green run over no rows would prove nothing**, which is the sibling
+    -- assertion 'declaredTypesNotVacuous' makes for the type field.
+    []    | length rows >= 10 -> pure ()
+          | otherwise ->
+              assertFailure ("only " <> show (length rows) <> " clauses in the view")
+  where
+    shortOf = reverse . takeWhile (/= '.') . reverse . nameDotted . ruleName
+
+    checked (r, rv) = case (ruleViewPath rv, ruleViewAt rv) of
+      (Just f, Just at) -> do
+        src <- lines <$> readFile f
+        let l = posLine at
+            c = posColumn at
+        pure $ if l < 1 || l > length src
+          then [unwords [f, "has no line", show l, "for", shortOf r]]
+          else
+            let text = drop (c - 1) (src !! (l - 1))
+                opens = "rule " `isPrefixOf` text || shortOf r `isPrefixOf` text
+             in [ unwords [ shortOf r, "says", f ++ ":" ++ show l ++ ":" ++ show c
+                          , "and that is", show text ]
+                | not opens ]
+      _ -> pure [unwords [shortOf r, "carries no position"]]
 
 -- | A green 'declaredTypes' over a base that declares nothing would prove nothing.
 declaredTypesNotVacuous :: IO ()
@@ -123,10 +171,14 @@ mismatch r
         )
   where
     rv = displayRule wholePath [] (Budget 200) [] [] 500 (Address []) Nothing r
-    shownLine = case renderMatches (rendering [] 0) [r] of
-      [line] -> line
-      other  -> "wrong count: " <> show (length other)
-    drawnLine = unwords (ruleViewName rv : ruleViewParams rv)
+    shownLine = renderRuleClause (rendering [] 0) r
+    -- **The focus is part of the line** (MS12 phase 359): the printer appends
+    -- @at ‹pattern›@ when a clause wrote one, and 'ruleViewFocus' is the same
+    -- text, so the parity this test exists for covers it. It was vacuous until
+    -- the base was rewritten onto @at@ — no clause had a focus to draw.
+    drawnLine =
+      unwords (ruleViewName rv : ruleViewParams rv)
+        ++ maybe "" (" at " ++) (ruleViewFocus rv)
     shownBody = map (renderInstr (rendering [] 500) []) (ruleBody r)
     drawnBody = map redrawStatement (ruleViewBody rv)
     shownHead =

@@ -47,6 +47,7 @@ import Thena.Development.Cursor
   , focus
   , insertAbove
   , into
+  , nextGoal
   , overLevels
   , rebuild
   , replaceFocus
@@ -57,7 +58,10 @@ import Thena.Fixtures
   ( allFour
   , guessShadowing
   , idMidway
+  , nestedGoals
   , richTypes
+  , shadowedBinders
+  , soleGuess
   , trailingLam
   , withConstraint
   )
@@ -77,6 +81,7 @@ tests =
     , testGroup "impossible moves" refusalTests
     , testGroup "changing the development" changeTests
     , testGroup "display" displayTests
+    , testGroup "the goal to work on next" nextGoalTests
     , testGroup "a level solution reaches every core term" levelTests
     , walkedLaws
     ]
@@ -650,3 +655,56 @@ levelTests =
           cur' = overLevels solve cur
           want = at (metaEverywhere zero) moves
        in (rebuild cur', focus cur' == focus want) @?= (metaEverywhere zero, True)
+
+-- --------------------------------------------------------------------------
+-- The goal to work on next (@~g3qnw@)
+-- --------------------------------------------------------------------------
+
+-- | The word printed for whatever goal a cursor stands on.
+--
+-- A string and not a 'Var', so a failing case says which goal it landed on
+-- rather than @Var 3@.
+goalWord :: Cursor -> String
+goalWord c = case focus c of
+  OnComponent (Claim _ (Ident i) _)   -> i
+  OnComponent (Guess _ (Ident i) _ _) -> i
+  _                                   -> "not standing on a goal"
+
+nextGoalTests :: [TestTree]
+nextGoalTests =
+  [ -- **It descends into a guess body**, so a goal under an @attack@ is reached
+    -- from the root. @id'@ itself does not count while @h@ is open inside it.
+    testCase "from the root it reaches a goal nested inside a guess" $
+      fmap goalWord (nextGoal (at idMidway [])) @?= Right "h"
+
+    -- **Standing on a goal, it stays there.** What makes @next@ safe to write
+    -- before every step of a strategy: it never skips work.
+  , testCase "on a goal already, it does not move" $
+      fmap goalWord (nextGoal (at allFour [mAlong, mAlong])) @?= Right "h"
+
+    -- **A hole is taken before a finished guess beside it**, because the walk
+    -- is the chain's own order and @h@ is written first.
+  , testCase "the earlier of two countable goals wins" $
+      fmap goalWord (nextGoal (at allFour [])) @?= Right "h"
+
+    -- **THE LOCALITY HE ASKED FOR.** @e@ is open and sits before the guess;
+    -- @i@ is open inside it. From inside the body the answer is @i@, so @next@
+    -- does not leave the part of the proof being worked on. From the root the
+    -- answer is @e@, because then the root chain is the piece of work — which
+    -- is the same rule, read at the level the cursor is at.
+  , testCase "inside a guess body, a goal in that body beats one outside it" $
+      fmap goalWord (nextGoal (at nestedGoals [mAlong, mInto])) @?= Right "i"
+  , testCase "and from the root that same development answers the outer one" $
+      fmap goalWord (nextGoal (at nestedGoals [])) @?= Right "e"
+
+    -- **THE CASCADE.** Nothing is left in the body, so it widens and answers
+    -- the guess that encloses the position — the @goto-root@ that used to end
+    -- every proof.
+  , testCase "a finished body widens to the guess that encloses it" $
+      fmap goalWord (nextGoal (at soleGuess [mAlong, mInto])) @?= Right "g"
+
+    -- **It refuses when there is nothing left**, which is what lets a strategy
+    -- stop instead of wandering. Distinct from 'NoSuchHole': nothing was named.
+  , testCase "a development with no goal refuses" $
+      fmap goalWord (nextGoal (at shadowedBinders [])) @?= Left NoGoalLeft
+  ]

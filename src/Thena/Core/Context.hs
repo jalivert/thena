@@ -7,13 +7,32 @@ module Thena.Core.Context
   , entryVar
   , entryIdent
   , entryType
+  , writableIn
+  , writableAmong
+  , writableRun
+  , writableRunAmong
+  , freeIn
+  , freshIdent
+  , wordReaches
   , substLevelsInEntry
   , piOver
   , lamOver
   ) where
 
 import Thena.Core.Level (Level, LevelVar)
-import Thena.Core.Term (Core (..), Ident, Scope, Var, close, substLevelsIn)
+import Thena.Core.Term
+  ( Core (..)
+  , Ident (..)
+  , Scope
+  , Var
+  , anonymousIdent
+  , close
+  , freeAmong
+  , freshIdent
+  , freshIdentWhere
+  , substLevelsIn
+  )
+import Thena.Syntax.Lexer (isIdentifier)
 
 -- | An entry in a working context: a name with a type, or a name with a type
 -- and a value.
@@ -51,6 +70,157 @@ entryIdent :: Entry -> Ident
 entryIdent e = case e of
   Hypothesis _ i _   -> i
   Definition _ i _ _ -> i
+
+-- | The word a binder carries as it enters this context: its own where that
+-- word is free here, and otherwise a free one.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/, part
+-- one: **every name the system puts into a scope is free in that scope**, and
+-- the copies count as inventing. The write-up is
+-- @.jalivert\/discussion\/binder-names-and-the-dagger.md@. So this is asked
+-- wherever the system supplies a word rather than the user writing one —
+-- "Thena.Engine"\'s @intro@ taking the word off the goal\'s Π binder,
+-- "Thena.Tactics.Specialise" peeling a method\'s telescope, and
+-- "Thena.Syntax.Resolve" minting one for an arrow\'s nameless argument.
+--
+-- Two things it does, and they were one ruling each:
+--
+--   * **a binder with no written name gets a real, writable one** — his ruling
+--     of the same day, /An unnamed argument gets a real name/. A binder with
+--     none carries 'Thena.Core.Term.anonymousIdent', and two of them in one
+--     context are two entries sharing the word @_@: the development printed @_@
+--     and @_1@, the user wrote @_@ meaning the first, and
+--     "Thena.Syntax.Resolve"\'s innermost-wins lookup gave the second —
+--     silently, where both have the same type, with @qed@ admitting the wrong
+--     term. The stem is @x@, which is what that module\'s @prefix@ mints for a
+--     generated wrapper\'s argument.
+--   * **a word already taken here is numbered** until it is free. That is the
+--     part the printer used to do on the way out, where nothing read it back:
+--     @tied@\'s method binds the @m@ its /data block/ wrote inside a theorem
+--     that has its own @m@, and @fill core`m`@ reached the inner binder while
+--     the screen said @m@ on the outer.
+--
+-- **A word the USER wrote is never touched, taken or not** — that is theirs to
+-- write (MS4 phase 41f, /"the name is used as given, taken or not"/), the
+-- shadowing it causes is allowed, and what it costs the outer binder is said
+-- where the outer binder is printed. This function is only ever asked about a
+-- word the system supplied, and a caller that cannot tell the two apart must
+-- not ask it.
+writableIn :: Context -> Ident -> Ident
+writableIn ctx = writableAmong (map entryIdent ctx)
+
+-- | 'writableIn' asked of the words in scope rather than of a context, for a
+-- binder that stands inside a term the system is building and so has binders
+-- of its own above it as well as the context's.
+--
+-- The rule is written once here and 'writableIn' is this with a context's
+-- words; 'Thena.Core.Term.freeAmong' is the same question without the word
+-- invented for a nameless binder.
+--
+-- **A WORD HAS TO BE ONE THE LEXER READS BACK AS A NAME, NOT ONLY ONE NOTHING
+-- ELSE HAS TAKEN** (MS12, @~vndxj@). Avoiding a clash is not the whole of
+-- being writable: a word is writable when a user can type it where it is
+-- printed and mean this binder, and a keyword typed there is not a name at
+-- all. **It had already happened twice and both times a human caught it** —
+-- @at@ was minted for a transport\'s carried value and phase 358 reserved @at@,
+-- and a rule variable was called @of@ when MS9 phase 179 reserved @of@
+-- (@.claude\/HAZARDS.md@ has that one, which shipped). Nothing minted was a
+-- keyword when this went in, so it changes no term; what it removes is the
+-- next reservation\'s silence.
+--
+-- **The lexer is asked rather than a list being copied down here**: a copy is
+-- a second authority to keep true, and 'Thena.Syntax.Lexer.isIdentifier' is
+-- already the question — "Thena.Engine" asks it of a word a user supplies for
+-- the same reason (§2.6). It also catches a word that is unreadable for some
+-- reason other than being a keyword, which a keyword list would not.
+--
+-- The import is not a new layer: "Thena.Syntax.Lexer" imports nothing of this
+-- project\'s, and "Thena.Errors" — which this module is under — already reaches
+-- it.
+writableAmong :: [Ident] -> Ident -> Ident
+writableAmong taken i
+  | i == anonymousIdent = freshIdentWhere readable taken (Ident "x")
+  | otherwise           = freshIdentWhere readable taken i
+  where
+    readable (Ident w) = isIdentifier w
+
+-- | A telescope of words the system is minting, each made writable among this
+-- context /and the ones the run has already placed outside it/ — innermost
+-- last, in the order the term binds them.
+--
+-- **This is what a tactic needs and 'writableIn' alone is not** (MS12 phase
+-- 333, @~44j68@): a tactic builds a motive that binds several words at once, so
+-- asking each of them of the context would let the second shadow the first. One
+-- walk over the telescope, threading what it has spent, is the whole of it —
+-- the same thing 'Thena.Core.Term.wordsMadeFree' does to a finished term, done
+-- where the words are minted because here the system's own binders are the only
+-- ones being asked about.
+--
+-- A repeated word is therefore numbered: @q@, @q1@, @q2@ for three tied
+-- equations, which his ruling requires — nested binders sharing a word mean the
+-- outer ones are reachable by no word at all.
+writableRun :: Context -> [Ident] -> [Ident]
+writableRun ctx = writableRunAmong (map entryIdent ctx)
+
+-- | 'writableRun' asked of the words in scope rather than of a context, for a
+-- telescope that stands inside a term the system is building.
+writableRunAmong :: [Ident] -> [Ident] -> [Ident]
+writableRunAmong = go
+  where
+    go _     []       = []
+    go taken (i : is) =
+      let i' = writableAmong taken i
+       in i' : go (taken ++ [i']) is
+
+-- | The word a binder already carries, made free in this context — and
+-- **nothing invented where there is no word.**
+--
+-- 'writableIn' plus the one thing it does that this does not, and the split is
+-- the one place a caller has to choose: a binder that enters the context
+-- /here/ needs a word and so is asked the other question, while a binder whose
+-- word is only being carried past — a method's telescope on its way to the
+-- report an arm binds from — may still be nameless when it arrives, and
+-- whoever finally binds it mints the word. Minting here as well would mean two
+-- stems for one binder, and the rule base's are the better words: an induction
+-- hypothesis is called @ih@ and not @x1@.
+--
+-- So an anonymous binder is passed through unchanged — @_@ numbered to @_1@ is
+-- the defect @~5g3tv@ named, not a repair of it — and a written word that is
+-- taken is numbered until it is free.
+--
+-- **The rule itself is 'Thena.Core.Term.freeAmong'**, which the same question
+-- asked of the binders enclosing a position also goes through
+-- ('Thena.Core.Term.wordsMadeFree') — this is it asked of a context.
+freeIn :: Context -> Ident -> Ident
+freeIn ctx = freeAmong (map entryIdent ctx)
+
+-- | Whether the word a binder carries still reaches it: the words in scope
+-- with it, __innermost first__, and its own place among them.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/,
+-- part two. This is the dual of 'freeIn' and it is the whole of what replaced
+-- the printer's freshening: **a word reaches the nearest binder carrying it**,
+-- so a binder with a nearer namesake reaches nothing and is shown marked
+-- instead of being quietly renamed. The invariant it serves is his: the word
+-- printed at any position, typed back where it stands, reaches that same
+-- thing, or is visibly marked as reaching nothing.
+--
+-- **It is asked of a scope and not of a context**, because the two positions
+-- that need it are the same question: a context's rows at a focus, and a
+-- printer's own descent under the binders of the term it is printing. Both
+-- produce the words innermost first — 'Thena.Render.envOf' folds the context
+-- that way and every printer pushes a binder on the front — and a Pi binder
+-- inside a printed type shadows an ambient entry exactly as a later entry
+-- does. Two spellings of this rule would mean the development and the panes
+-- could disagree about which words are live.
+--
+-- Out of range it answers 'True': 'Thena.Syntax.Print.nameOf' has no word for
+-- a variable that is in no scope and prints the variable itself, which says so
+-- without a mark.
+wordReaches :: [String] -> Int -> Bool
+wordReaches ws k = case splitAt k ws of
+  (nearer, w : _) -> w `notElem` nearer
+  _               -> True
 
 -- | The type of an entry, whichever kind it is. Both constructors have one, in
 -- the same last position, which is why this accessor is total.

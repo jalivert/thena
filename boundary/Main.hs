@@ -29,36 +29,66 @@ import Control.Monad (unless)
 import System.Exit (exitFailure)
 
 import Thena.Driver
-  ( Response (..)
+  ( Entry (..)
+  , Leniency (..)
+  , Response (..)
   , Session
   , Stop (..)
   , digestText
   , filesRead
+  , loadRuleTexts
+  , moduleName
   , fuelOf
   , oneLine
   , oneProgram
+  , provedSlices
+  , recordOf
   )
-import Thena.Files (startingSession)
+import Thena.Files (importModule, startingSession)
 import Thena.Render (renderResponse)
+import Data.List (nub)
+
 import Thena.View
   ( Budget (..)
   , binderAddresses
+  , choicesView
   , developmentView
   , focusAddress
   , focusProgram
   , focusTypeView
+  , goalsView
   , machineView
   , matchesView
+  , nameDotted
   , offerView
   , statementOfferView
   , parseView
+  , proofsView
   , rulesView
   , sessionTrust
   , trustView
   )
+import Thena.View (failureView, refusedFileView)
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
-import Thena.View.Development (LinkView (..))
+import Thena.View.Failure
+  ( Block (..)
+  , FaultKind (..)
+  , FaultView (..)
+  , Nature (..)
+  , PartView (..)
+  , Piece (..)
+  , Pos (..)
+  , Role (..)
+  , Side (..)
+  , StopView (..)
+  , Why (..)
+  )
+import Thena.View.Choices (AltView (..), ChoiceView (..))
+import Thena.View.Development (LinkShape (..), LinkView (..))
+import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Machine (MachineView (..))
+import Thena.View.Matches (MatchView (..))
+import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
 import Thena.View.Rules (RuleView (..))
 import Thena.View.Tokens (TokenView (..), tokensView)
 import Thena.View.Trust (TrustLevel (..), TrustView (..))
@@ -79,21 +109,109 @@ main = do
         , "attack"
         ]
       booted = [ "FAILED: startingSession: " <> show t | t <- trouble ]
-  failures <- pure (booted <> concatMap ($ s) checks)
+  -- **The one view that is not computed from the session alone** (MS12 phase
+  -- 325), so it needs a module that did not all go in and cannot be reached
+  -- from the shared session above.
+  unfinished <- partial
+  refused <- grammar
+  base <- ruleFile
+  inside <- ruleStatement
+  failures <-
+    pure (booted <> unfinished <> refused <> base <> inside <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
-  putStrLn ("the boundary holds: " <> show (length checks) <> " views reached")
+  putStrLn ("the boundary holds: " <> show (length checks + 4) <> " views reached")
   where
     step acc l = fst (oneLine acc l)
+
+-- | Lines through the session, the way a frontend advances one — so a check
+-- that needs a session of its own builds it here rather than moving the one
+-- every other check shares.
+advance :: Session -> [String] -> Session
+advance = foldl (\acc l -> fst (oneLine acc l))
+
+-- | Is the cursor on this chain or on any chain nested inside it?
+--
+-- **A guess branches, so the focused link need not be at the top** (MS12 phase
+-- 357): since the introducers became positional, @attack@ leaves the cursor on
+-- the hole it opened, which is a link inside the guess's own body. A pane that
+-- scanned only the outer chain for 'linkFocus' would draw no highlight at all
+-- from the first @attack@ onwards, so the recursion is the contract and not a
+-- convenience of this check.
+focusedLink :: [LinkView] -> Bool
+focusedLink = any one
+  where
+    one l = linkFocus l || case linkShape l of
+      AGuessLink { guessBody = body } -> focusedLink body
+      _                               -> False
 
 checks :: [Session -> [String]]
 checks =
   [ \s -> want "developmentView" (not (null (developmentView budget s)))
-  , \s -> want "a link is marked" (any linkFocus (developmentView budget s))
+  , \s -> want "a link is marked" (focusedLink (developmentView budget s))
   , \s -> want "machineView" (machineReached (machineView budget s))
   , \s -> want "focusTypeView" (maybe True (const True) (focusTypeView budget s))
   , \s -> want "rulesView" (not (null [ r | (_, rs) <- rulesView budget s, r <- rs ]))
-  , \s -> want "matchesView" (not (null (map ruleViewName (matchesView budget s))))
+    -- **One row per name and arity, and the row carries its type** (his
+    -- ruling, 2026-11-19). The boundary's business is that a frontend can
+    -- reach both: a view that lost the signature would still be non-empty.
+  , \s -> want "matchesView" (not (null (map matchViewName (matchesView budget s))))
+  , \s -> want "matchesView carries a type"
+            (any (\mv -> matchViewType mv /= Nothing) (matchesView budget s))
+  , \s -> want "matchesView names each rule once"
+            (let ns = map (\mv -> (matchViewName mv, matchViewArity mv))
+                          (matchesView budget s)
+              in length ns == length (nub ns))
+    -- **The goals pane's own view** (MS12 phase 324, his request of 2026-11-19):
+    -- every goal left, each with the word that reaches it, and guesses listed
+    -- as goals as well as holes. The session here is one @attack@ in, so the
+    -- root is a guess and there is a hole inside it — both kinds, which is the
+    -- half of his request that the development view could not answer.
+  , \s -> want "goalsView lists a guess and a hole"
+            (let ks = map goalViewKind (goalsView budget s)
+              in AGuess `elem` ks && AHole `elem` ks)
+    -- **The word and the address reach the same place, and this is the check
+    -- that matters.** A pane draws 'goalViewVar' for the reader to type; if the
+    -- prompt did not bind that word, or bound it to another position, the pane
+    -- would be offering a move that goes somewhere else. Running @goto ‹word›@
+    -- and comparing where the focus lands against the row's own address is the
+    -- contract said in the frontend's own terms.
+  , \s -> want "every goal's word reaches its address"
+            (all (\g -> focusAddress (advance s ["goto " <> goalViewVar g])
+                          == goalViewAt g)
+                 (goalsView budget s))
+    -- **A standalone choice-points pane is reachable from the boundary** (his
+    -- ruling, 2026-11-16), and the one thing worth asserting is that it is not
+    -- always empty: at a settled prompt there is nothing to retry, so this
+    -- check drives the session two instructions into @step@ and stops there,
+    -- where a 'Thena.Engine.Choice' frame is standing.
+  , \s -> want "choicesView reaches a live choice point"
+            (case choicesView (advance s [":step 2", "step"]) of
+               c : _ -> choiceViewId c > 0
+                          && not (null (altViewName (choiceViewRunning c)))
+                          && not (null (choiceViewUntried c))
+                          -- **And the clause is placed** (MS12 phase 342): a
+                          -- pane that offers to open the alternative needs a
+                          -- path and a line, and every clause the shipped base
+                          -- read has both. A name alone is what @~mhz7j@ is
+                          -- about.
+                          && all placed (choiceViewRunning c : choiceViewUntried c)
+               []    -> False)
+  , \s -> want "choicesView is empty where nothing can be retried"
+            (null (choicesView s))
+    -- **AND A CLAUSE IN THE RULES VIEW IS PLACED TOO** (MS12 phase 343,
+    -- @~zx8cb@). The choice-point check above proves it for an alternative;
+    -- this is the view whose every row /is/ a clause, and a pane built from it
+    -- is the one that will offer to open one. Asserted here rather than only in
+    -- the suite because naming 'Thena.View.Failure.Pos' for a clause is the
+    -- half only a frontend-shaped caller can prove.
+  , \s -> want "a clause in the rules view says where it is written"
+            (let rs = [ r | (_, vs) <- rulesView budget s, r <- vs ]
+              in not (null rs)
+                   && all (\r -> case (ruleViewPath r, ruleViewAt r) of
+                                   (Just f, Just at) -> not (null f) && posLine at > 0
+                                   _                 -> False)
+                          rs)
     -- A rule's declared type arrives structured, not as a rendered line
     -- (MS7 phase 133) — so "Thena.View.Type" really is past the seam.
   , \s -> want "a signature view is structured"
@@ -114,8 +232,21 @@ checks =
     -- **The entry offer, and that its bound names cross** (MS7 phase 140): a
     -- frontend sees the names the lines above the cursor left in scope, with their
     -- types, without importing anything past this boundary.
+    -- **The session's own goals are in the offer too, since MS12 phase 324**:
+    -- a typed line starts with every hole and guess bound, so @t@ (the attacked
+    -- root, a guess) and @t1@ (the hole inside it) stand where a @Core@ stands,
+    -- ahead of what the entry's own lines bound.
+    --
+    -- **The innermost goal comes first here and the outermost first in
+    -- 'goalsView'**, and the two orders are not an accident to be made to agree:
+    -- this is the offer at a cursor, where the nearest binding is the one a
+    -- reader most likely means, and that list is already /nearest first/
+    -- ('Thena.Instral.Infer.blockResult'\'s @live@). A goals pane is the other
+    -- question — what is left to prove — and answers in the order the
+    -- development is written.
   , \s -> want "statementOfferView names what the entry bound"
-            (map boundName (offeredBound (statementOfferView s [WrittenText "h = here\ngoto "] [])) == ["h"])
+            (map boundName (offeredBound (statementOfferView s [WrittenText "h = here\ngoto "] []))
+               == ["t1", "t", "h"])
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
@@ -132,6 +263,18 @@ checks =
     -- A development that rests on nothing says so, which is the answer a pane
     -- draws for almost every proof.
   , \s -> want "nothing is resting on it yet" (null (trustViewClaims (trustView budget s)))
+    -- **The quest list crosses with its statements drawn** (MS12 phase 310, his
+    -- ruling of 2026-11-11: a pane held open on @:proofs@). Both halves are
+    -- checked, because the pane needs both — what the session is on, which it
+    -- marks, and what it has put down, which it offers @:resume@ on. A parked
+    -- row is made here rather than asserted empty: an empty list would pass
+    -- without 'Thena.View.Proofs.QuestView' ever being built.
+  , \s -> want "proofsView marks the quest the session is on"
+            (fmap questViewWord (proofsViewOn (proofsView budget s)) == Just "t")
+  , \s -> want "and a parked quest crosses with its statement"
+            (case proofsViewParked (proofsView budget (fst (oneLine s ":suspend"))) of
+               [QuestView w (AStatement _)] -> w == "t"
+               _                            -> False)
   , \s -> want "a job runs in slices" (job s)
     -- **Which files the session read, and what they said** (MS11 phase 295).
     -- It is the one part of a session on disc that a frontend cannot work out
@@ -139,6 +282,20 @@ checks =
     -- knows which path a module name resolved to and what was actually opened —
     -- so the claim that it crosses is a claim about this suite's imports. The
     -- shipped prelude and standard base are what a booted session has read.
+    -- **Which theorems the session proved, and where each one is in its own
+    -- transcript** (MS12 phase 311). It is the other half of what a session
+    -- stored on disc is keyed by: the lines are 'recordOf''s and the frontend
+    -- has them, but the name is a 'Thena.Driver.Entry''s @entryProof@, whose
+    -- type crosses here with no fields a frontend can reach — so without these
+    -- two the index can say where a proof is and not which one it is. @t@
+    -- arrives open and is given up, so the one slice is the proof that sealed,
+    -- and an abandoned attempt is not one.
+  , \s -> want "provedSlices says which proof and where"
+            (case provedSlices (proved s) of
+               [("arr", i, j)] -> j == i + 2
+               _               -> False)
+  , \s -> want "and a name crosses as the text an index is keyed by"
+            ((nameDotted <$> entryProof (last (recordOf (proved s)))) == Just "arr")
   , \s -> want "filesRead reaches a frontend" (length (filesRead s) == 2)
   , \s -> want "and a digest writes down"
             (all ((== 16) . length . digestText . snd) (filesRead s))
@@ -146,12 +303,26 @@ checks =
   where
     budget = Budget 200
     want name ok = [ "FAILED: " <> name | not ok ]
+    -- One sealed proof, from the session the checks are handed: it arrives
+    -- with @t@ open, so that is given up first and @arr@ is three lines.
+    proved s = foldl (\acc l -> fst (oneLine acc l)) s
+      [ ":abandon"
+      , ":theorem arr : Type\8321"
+      , "elaborate surface`Type\8320 -> Type\8320`"
+      , "qed"
+      ]
     isSession :: Session -> Bool
     isSession _ = True
     -- At rest the program is empty, so \"non-empty\" is the wrong shape of check;
     -- what says the view was computed is that its three panes agree with a
     -- machine that has nothing left to run.
-    machineReached mv = null (machinePc mv) == null (machineEnv mv)
+    -- **At rest the program is empty and the environment is not** (MS12 phase
+    -- 324). It read @null pc == null env@ until then, on the premise that the
+    -- environment is what a running program bound — and a line now starts with
+    -- the session's goals in it ('Thena.Engine.goalEnv'), so a settled prompt
+    -- has an empty program and a populated environment. Both halves of the view
+    -- are still what is being reached; the invariant between them is what moved.
+    machineReached mv = null (machinePc mv) && not (null (machineEnv mv))
 
 -- | **What a job is, in full** (phase 128): set a budget, advance a slice at a
 -- time, and stop by not asking for the next slice.
@@ -171,3 +342,132 @@ job s = slice False (200 :: Int) (oneLine (fst (oneLine s ":step on")) claim)
     slice _ n (s', Ran _ _ (Paused 1)) | n > 0 = slice True (n - 1) (oneLine s' ":step")
     slice paused _ (_, Ran _ _ Completed) = paused
     slice _ _ _ = False
+
+-- | **A module that loads as far as it can, and the view of what did not**
+-- (MS12 phase 325).
+--
+-- Its own check because a frontend reaches this one differently from every
+-- other view: the 'Thena.Driver.NotDone' comes out of the response that
+-- reported the module, not out of the session. So what is asserted here is that
+-- a frontend can get from @import@ to a laid-out failure without naming an
+-- engine type — and in particular that it never needs 'Thena.Errors', which it
+-- cannot import.
+--
+-- **The parts are checked and not just the arrival.** A 'StopView' whose kind
+-- came through and whose name did not would pass a non-empty check and be
+-- useless: the name is the part the tui track asked for by name.
+--
+-- **AND THE POSITION, SINCE MS12 PHASE 334** (@~hcr2d@): the line and column
+-- are what make the row a place to go, and a frontend has to be able to name
+-- 'Thena.View.Failure.Pos' to use them — which is the half of this phase that
+-- only the boundary can prove.
+partial :: IO [String]
+partial = do
+  (s0, _) <- startingSession
+  case moduleName "test.modules.PartlyGood" of
+    Nothing -> pure ["FAILED: the fixture's name does not read"]
+    Just m -> do
+      (s, out, _) <- importModule Lenient s0 m
+      pure $ case [ failureView (Budget 200) s u
+                  | ProofLoadedPartly _ _ _ _ unfin <- out, u <- unfin ] of
+        [v] | Broken <- stopViewNature v
+            , Just (Pos 12 1) <- stopViewAt v
+            , Faulty [f] <- stopViewWhy v
+            , NotInScope <- faultViewKind f
+            , [AName "nonesuch"] <-
+                [ pc | PartView TheWord pc <- faultViewParts f ] -> []
+        other -> ["FAILED: failureView: " <> show other]
+
+-- | **A refused grammar block, walked** (MS12 phase 338, @~csndm@).
+--
+-- Its own check for the same reason 'partial' is: this failure is reached
+-- through the response that reported the module. What only the boundary can
+-- prove is that a frontend can name the vocabulary the walk is written in —
+-- 'Side' is new this phase, and a pane that cannot name it cannot tell a rule's
+-- premises from its conclusion.
+--
+-- **The location and the problem are asserted together**, because the split is
+-- the contract: 'TheProduction' on the fault that wraps, and what is wrong with
+-- it in 'faultViewInside'.
+grammar :: IO [String]
+grammar = do
+  (s0, _) <- startingSession
+  case moduleName "test.modules.GrammarRule" of
+    Nothing -> pure ["FAILED: the grammar fixture's name does not read"]
+    Just m -> do
+      (s, out, _) <- importModule Lenient s0 m
+      pure $ case [ failureView (Budget 200) s u
+                  | ProofLoadedPartly _ _ _ _ unfin <- out, u <- unfin ] of
+        [v] | Broken <- stopViewNature v
+            , Faulty [f] <- stopViewWhy v
+            , GrammarRefused <- faultViewKind f
+            , [ABlock AJudgment] <- [ pc | PartView TheBlock pc <- faultViewParts f ]
+            , [AName "T-true"] <- [ pc | PartView TheRule pc <- faultViewParts f ]
+            , Just inner <- faultViewInside f
+            , CouldNotRead <- faultViewKind inner
+            , [ASide TheConclusion] <-
+                [ pc | PartView TheSide pc <- faultViewParts inner ] -> []
+        other -> ["FAILED: failureView of a refused grammar: " <> show other]
+
+-- | **A rule file that would not load, walked** (MS12 phase 348, @~cjznk@, his
+-- ruling of 2026-11-24).
+--
+-- Its own check for 'partial'\'s reason and one more: this failure arrives in a
+-- 'Response' that no view was ever reached from, so what is asserted is that a
+-- frontend can get from a refused @:load@ to a laid-out fault — the kind, and a
+-- clause as a place to go — without naming an engine type. **A pane drew the
+-- prompt's text or nothing at all before this phase.**
+--
+-- **The fixture is written here rather than read from disc**, because
+-- 'loadRuleTexts' is the door a frontend holding its own buffer uses: the file
+-- the author is editing need not have been saved.
+ruleFile :: IO [String]
+ruleFile = do
+  (s0, _) <- startingSession
+  let src = "rule base boundary where\nf x = concat x \"a\"\nf y = concat y \"b\"\n"
+  pure $ case snd (loadRuleTexts s0 [("boundary.thena.rules", src)]) of
+    RuleFileRefused _ e ->
+      let v = refusedFileView (Budget 200) s0 "boundary.thena.rules" e
+       in case (stopViewNature v, stopViewWhy v) of
+            (Broken, Faulty [f])
+              | ClauseUnreachable <- faultViewKind f
+              , [ACount 1] <- [ pc | PartView TheArity pc <- faultViewParts f ]
+              , [APlace "boundary.thena.rules" (Pos 3 1)] <-
+                  [ pc | PartView ThePlace pc <- faultViewParts f ] -> []
+            other -> ["FAILED: refusedFileView: " <> show other]
+    other -> ["FAILED: the rule file was not refused: " <> show other]
+
+-- | __And a mistake inside a body is at the statement that holds it__ (MS12
+-- phase 349, @~8w6qw@, his ask of 2026-11-24: /"does the failure get reported
+-- with a clickable file-path and line number to the mistake?"/).
+--
+-- Its own check beside 'ruleFile' because it is the other half of the question:
+-- that one asserts a fault /about a clause/ is a place to go, which two faults
+-- already were; this one asserts it of a fault about something inside a clause,
+-- which is the common case and had only the statement's index inside the rule
+-- — a number that reads like a line and is not one.
+--
+-- **The statement is on the fourth line and the clause on the second**, so a
+-- place taken from the clause would pass the type and send the author three
+-- lines up.
+ruleStatement :: IO [String]
+ruleStatement = do
+  (s0, _) <- startingSession
+  let src = "rule base inside where\nrule crush at ? _ : _ :- do\n"
+         <> "  say \"trying\"\n  say nonesuch\n"
+  pure $ case snd (loadRuleTexts s0 [("inside.thena.rules", src)]) of
+    RuleFileRefused _ e ->
+      let v = refusedFileView (Budget 200) s0 "inside.thena.rules" e
+       in case (stopViewNature v, stopViewWhy v) of
+            (Broken, Faulty [f])
+              | [ALine 2] <- [ pc | PartView TheInstruction pc <- faultViewParts f ]
+              , [APlace "inside.thena.rules" (Pos 4 3)] <-
+                  [ pc | PartView ThePlace pc <- faultViewParts f ] -> []
+            other -> ["FAILED: refusedFileView of a statement: " <> show other]
+    other -> ["FAILED: the rule file was not refused: " <> show other]
+
+-- | Does this alternative say where its clause is written (MS12 phase 342)?
+placed :: AltView -> Bool
+placed a = case (altViewPath a, altViewAt a) of
+  (Just f, Just _) -> not (null f)
+  _                -> False

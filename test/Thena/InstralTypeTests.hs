@@ -20,7 +20,7 @@ import Thena.Instral.Concrete
   ( RawSignature (..)
   , RawTy (..)
   )
-import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Lexer (Pos (..), lexTokens)
 import Thena.Syntax.Parser (parseInstralTy)
 
 import Thena.Instral.Type
@@ -150,16 +150,19 @@ theBuiltInTypes =
       -- the sentence that said how many went stale and the assertion did not.
     , testCase "and the list is exactly these" $
         builtInTypes
-          @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-              , "Development", "Level", "Pattern", "Binder", "List", "Option"
+          @?= [ "String", "Name", "Ident", "Int", "Char", "Bool", "Surface"
+              , "Core", "Development", "Level", "Pattern", "Binder"
+              , "MethodShape", "List", "Option"
               ]
     , testCase "…which is what renderTy prints for each of them" $
         map renderTy
-            [ TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment
-            , TPattern, TBinder, TList TInt, TOption TInt
+            [ TString, TName, TIdent, TInt, TChar, TBool, TSurface, TCore
+            , TDevelopment, TPattern, TBinder, TMethodShape
+            , TList TInt, TOption TInt
             ]
-          @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-              , "Development", "Pattern", "Binder", "List Int", "Option Int"
+          @?= [ "String", "Name", "Ident", "Int", "Char", "Bool", "Surface"
+              , "Core", "Development", "Pattern", "Binder", "MethodShape"
+              , "List Int", "Option Int"
               ]
     ]
   where
@@ -222,9 +225,9 @@ readBack src = case lexTokens src of
   Left e   -> Left (show e)
   Right ts -> case parseInstralTy ts of
     Left e  -> Left (show e)
-    Right t -> case resolveSignature (RawSignature "f" t) of
-      Left e       -> Left (show e)
-      Right (_, s) -> Right (renumbered s)
+    Right t -> case resolveSignature (RawSignature (Pos 1 1) "f" t) of
+      Left e          -> Left (show e)
+      Right (_, _, s) -> Right (renumbered s)
 
 -- | A signature's variables, numbered by where they first appear.
 renumbered :: Signature -> Signature
@@ -377,6 +380,10 @@ signatureTests =
       -- **The coercion the shipped base needs** — @ask … name@ gives a Name and
       -- @concat@ wants a String.
     , sig "name-text"    (Op.NameText r)                "Name -> String"
+      -- **The conversion his ruling of 2026-11-25 needs** (MS12 phase 353): a
+      -- name is an identifier with no token, and a rule holding a /variable/ of
+      -- @Name@ writes it down rather than being coerced.
+    , sig "name-ident"   (Op.NameIdent r)               "Name -> Ident"
     , sig "concat"       (Concat r r)                   "String -> String -> String"
     , sig "say"          (Say r)                        "String -> ()"
       -- **The kind decides what @ask@ hands back**, which is the one place a
@@ -413,7 +420,7 @@ signatureTests =
       -- values, so they simply have two signatures.
       -- **It answers with the hole it opened** (MS8), which is what lets a clause
       -- work inside the binder it just made.
-    , sig "prim-lambda, named"   (IntroPi (Just r))     "Name -> Core"
+    , sig "prim-lambda, named"   (IntroPi (Just r))     "Ident -> Core"
     , sig "prim-lambda, unnamed" (IntroPi Nothing)      "Core"
     ]
   where
@@ -427,8 +434,13 @@ headTests :: TestTree
 headTests =
   testGroup
     "head tests"
-    [ testCase "a focus question asks about nothing" $
-        map snd (testTypes FocusIsHole) @?= []
+      -- **There is no focus test left to ask about nothing** — his ruling of
+      -- 2026-11-27 retired @focus-is-component@, the last of the four, @at _@
+      -- being the spelling for /any/ component (@~9m27n@). A goal question is
+      -- what stands in its place here: it asks about the focus and takes no
+      -- operand.
+    [ testCase "a goal question asks about nothing" $
+        map snd (testTypes GoalTypeIsPi) @?= []
     , testCase "a surface question wants a surface term" $
         map snd (testTypes (SurfaceIsLambda r)) @?= [TSurface]
     , testCase "and so does every other one" $

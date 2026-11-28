@@ -27,9 +27,10 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName)
-import Thena.Declared (declaredAs, named)
+import qualified Thena.Declared as Declared
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , loadProofSource
   )
@@ -119,14 +120,14 @@ primed :: [TestTree]
 primed =
   [ testCase "the generated fresh mints a name the class accepts, and it reads back" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 primedSource of
+      case loadProofSource Strict s0 primedSource of
         (_, ProofLoaded {}) -> pure ()
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A warning, not a refusal** — his second principle. The language works and
     -- its substitution is correct; only printing a renamed binder is lost.
     testCase "a class no character extends warns rather than being refused" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 unprimeableSource of
+      case loadProofSource Strict s0 unprimeableSource of
         (_, ProofLoaded _ _ _ ws)
           | any isUnprimeable ws -> pure ()
           | otherwise -> assertFailure ("loaded, but did not warn: " ++ show ws)
@@ -215,15 +216,16 @@ classes :: [TestTree]
 classes =
   [ testCase "two occurrence productions at two classes install, one family each" $ do
       env <- loadedFrom twoOwnSource
-      [ typeOf env f | f <- [ "D.fresh.x", "D.fresh.i", "D.fv.x", "D.fv.i"
-                            , "D.subst-*", "D.subst.x", "D.subst.i" ] ]
+      [ typeOf env ("TwoOwn." ++ f)
+        | f <- [ "D.fresh.x", "D.fresh.i", "D.fv.x", "D.fv.i"
+               , "D.subst-*", "D.subst.x", "D.subst.i" ] ]
         @?= [ Just "String -> List.List String -> String"
             , Just "String -> List.List String -> String"
-            , Just "D.D -> List.List String"
-            , Just "D.D -> List.List String"
-            , Just "D.D -> List.List (And.And String D.D) -> List.List (And.And String D.D) -> D.D"
-            , Just "D.D -> String -> D.D -> D.D"
-            , Just "D.D -> String -> D.D -> D.D"
+            , Just "TwoOwn.D.D -> List.List String"
+            , Just "TwoOwn.D.D -> List.List String"
+            , Just "TwoOwn.D.D -> List.List (And.And String TwoOwn.D.D) -> List.List (And.And String TwoOwn.D.D) -> TwoOwn.D.D"
+            , Just "TwoOwn.D.D -> String -> TwoOwn.D.D -> TwoOwn.D.D"
+            , Just "TwoOwn.D.D -> String -> TwoOwn.D.D -> TwoOwn.D.D"
             ]
     -- **The headline of the phase**: a map per class, and the class's map is a
     -- map into the language that OWNS it, so substituting @X@ into a term takes
@@ -237,20 +239,22 @@ classes =
         , "x : Token String", "x = /[a-z]+/", ""
         , "language K, A where", "  kvar : x as occurrence -> x", ""
         , "language L, M where", "  lvar : x as occurrence -> x" ])
-      [ typeOf env f | f <- ["K.subst.x", "L.subst.x"] ]
-        @?= [Just "K.K -> String -> K.K -> K.K", Just "L.L -> String -> L.L -> L.L"]
+      [ typeOf env ("Shared." ++ f) | f <- ["K.subst.x", "L.subst.x"] ]
+        @?= [ Just "Shared.K.K -> String -> Shared.K.K -> Shared.K.K"
+            , Just "Shared.L.L -> String -> Shared.L.L -> Shared.L.L" ]
   , testCase "a class another language owns gives a substitution into that language" $ do
       env <- loadedFrom fsubSource
-      [ typeOf env f | f <- [ "Tm.subst-*", "Tm.subst.x", "Tm.subst.X", "Tm.fv.X"
-                            , "Tm.fresh.X", "Ty.fresh.X", "Ty.subst-*" ] ]
-        @?= [ Just "Tm.Tm -> List.List (And.And String Tm.Tm) -> List.List (And.And String Ty.Ty) -> Tm.Tm"
-            , Just "Tm.Tm -> String -> Tm.Tm -> Tm.Tm"
-            , Just "Tm.Tm -> String -> Ty.Ty -> Tm.Tm"
-            , Just "Tm.Tm -> List.List String"
+      [ typeOf env ("Fsub." ++ f)
+        | f <- [ "Tm.subst-*", "Tm.subst.x", "Tm.subst.X", "Tm.fv.X"
+               , "Tm.fresh.X", "Ty.fresh.X", "Ty.subst-*" ] ]
+        @?= [ Just "Fsub.Tm.Tm -> List.List (And.And String Fsub.Tm.Tm) -> List.List (And.And String Fsub.Ty.Ty) -> Fsub.Tm.Tm"
+            , Just "Fsub.Tm.Tm -> String -> Fsub.Tm.Tm -> Fsub.Tm.Tm"
+            , Just "Fsub.Tm.Tm -> String -> Fsub.Ty.Ty -> Fsub.Tm.Tm"
+            , Just "Fsub.Tm.Tm -> List.List String"
               -- Minting a name of a class belongs to the language that owns it.
             , Nothing
             , Just "String -> List.List String -> String"
-            , Just "Ty.Ty -> List.List (And.And String Ty.Ty) -> Ty.Ty"
+            , Just "Fsub.Ty.Ty -> List.List (And.And String Fsub.Ty.Ty) -> Fsub.Ty.Ty"
             ]
   ]
   where
@@ -258,14 +262,15 @@ classes =
     -- type-check unless the generated functions compute what they must.
     loadedFrom src = do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+    -- **'Declared.named' and not this file's 'named'**: these cases have
+    -- fixtures of their own, so each passes its module's whole name (MS12
+    -- phase 313).
     typeOf env f =
       unlevelled . renderCore (rendering [] 0) [] . definitionType
-        -- **'named' and not @rootName@**: the generated family lives in the
-        -- language's namespace, so @LC.fv.x@ is a path and a word.
-        <$> lookupDefinition (named f) env
+        <$> lookupDefinition (Declared.named f) env
 
 -- ---------------------------------------------------------------------------
 -- The fixture
@@ -303,10 +308,17 @@ source =
     , "open LB"
     ]
 
+-- | __A name of the fixture module's, under the fixture module's namespace__
+-- (MS12 phase 313). @source@ is @module Subst where@, and a module's
+-- declarations live under the name its header gives it, so the generated
+-- families are @Subst.LC.subst.x@ and the rest. The test titles stay short.
+named :: String -> GlobalName
+named = Declared.named . ("Subst." ++)
+
 loaded :: IO GlobalEnv
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
     (s1, other) -> assertFailure (unlines (renderResponse s1 other))
 
@@ -332,8 +344,11 @@ base = Canonical (named "Ty.base") [] []
 -- | **The language is threaded, not recovered from the word** (MS10 phase 251):
 -- a production lives in its language's namespace, so @app@ in @LC@ is @LC.app@,
 -- and a 'Tm' keeps the short word because that is what the roles are keyed by.
+--
+-- **AND THE LANGUAGE IS UNDER THE FIXTURE MODULE'S NAMESPACE** (MS12 phase
+-- 313), so @app@ in @LC@ is @Subst.LC.app@ — 'named' is where that is said.
 toCore :: String -> Tm -> Core
-toCore l (Tm c fs) = Canonical (GlobalName [l] c) [] (map field fs)
+toCore l (Tm c fs) = Canonical (named (l ++ "." ++ c)) [] (map field fs)
   where
     field f = case f of
       Name s -> Primitive (LString s)
@@ -370,24 +385,41 @@ listOfStrings env t = case whnf env [] t of
 -- 244): @LC.subst.x@ is @subst-x@ in @LC@, and a root-level name holding the
 -- dots is nothing at all.
 call :: GlobalEnv -> String -> [Core] -> Core
-call env f = foldl App (Global (named f) (replicate levels LZero))
-  where levels = maybe 0 (length . definitionLevels) (lookupDefinition (named f) env)
+call env f = called env (named f)
+
+-- | __The same for a name of the PRELUDE's, which is the root's__ (MS12 phase
+-- 313): @List.cons@ and @And.both@ belong to no module, so they are not under
+-- the fixture's namespace the way its own languages are.
+callRoot :: GlobalEnv -> String -> [Core] -> Core
+callRoot env f = called env (Declared.named f)
+
+called :: GlobalEnv -> GlobalName -> [Core] -> Core
+called env g = foldl App (Global g (replicate levels LZero))
+  where levels = maybe 0 (length . definitionLevels) (lookupDefinition g env)
 
 stringList :: GlobalEnv -> [String] -> Core
-stringList env = foldr (\s r -> call env "List.cons" [str, Primitive (LString s), r]) (call env "List.nil" [str])
+stringList env =
+  foldr (\s r -> callRoot env "List.cons" [str, Primitive (LString s), r])
+        (callRoot env "List.nil" [str])
   where str = Global (rootName "String") []
 
 -- | A simultaneous map, as @List (And String L)@.
 substMap :: GlobalEnv -> String -> [(String, Tm)] -> Core
-substMap env lang = foldr (\(k, t) r -> call env "List.cons" [pair, both k t, r]) (call env "List.nil" [pair])
+substMap env lang =
+  foldr (\(k, t) r -> callRoot env "List.cons" [pair, both k t, r])
+        (callRoot env "List.nil" [pair])
   where
-    pair = call env "And.And" [str, Global (declaredAs lang) []]
-    both k t = call env "And.both" [str, Global (declaredAs lang) [], Primitive (LString k), toCore lang t]
+    pair = callRoot env "And.And" [str, Global (named (lang ++ "." ++ lang)) []]
+    both k t = callRoot env "And.both"
+                 [ str, Global (named (lang ++ "." ++ lang)) []
+                 , Primitive (LString k), toCore lang t ]
     str = Global (rootName "String") []
 
 -- | The roles of a language's constructors, as the environment records them.
 rolesOf :: GlobalEnv -> String -> [(String, [ArgRole])]
-rolesOf env lang = case lookupInductive (declaredAs lang) env of
+-- **Under the fixture's own module namespace** (MS12 phase 313): @source@ is
+-- @module Subst where@, so @LC@'s datatype is @Subst.LC.LC@.
+rolesOf env lang = case lookupInductive (named (lang ++ "." ++ lang)) env of
   Just d -> [ (nameWord (constructorName c), constructorRoles c) | c <- inductiveConstructors d ]
   Nothing -> []
 
@@ -501,10 +533,14 @@ declared io =
   -- what the type is, and it is asserted rather than printed away.
   | (f, ty, levels) <-
       [ ("LC.fresh.x", "String -> List.List String -> String", 1)
-      , ("LC.fv.x", "LC.LC -> List.List String", 1)
-      , ("LC.subst-*", "LC.LC -> List.List (And.And String LC.LC) -> LC.LC", 3)
-      , ("LC.subst.x", "LC.LC -> String -> LC.LC -> LC.LC", 0)
-      , ("LB.subst.x", "LB.LB -> String -> LB.LB -> LB.LB", 0)
+      , ("LC.fv.x", "Subst.LC.LC -> List.List String", 1)
+      , ( "LC.subst-*"
+        , "Subst.LC.LC -> List.List (And.And String Subst.LC.LC) -> Subst.LC.LC"
+        , 3 )
+      , ( "LC.subst.x"
+        , "Subst.LC.LC -> String -> Subst.LC.LC -> Subst.LC.LC", 0 )
+      , ( "LB.subst.x"
+        , "Subst.LB.LB -> String -> Subst.LB.LB -> Subst.LB.LB", 0 )
       ]
   ]
     ++ [ testCase "a language that reaches no class gets none" $ do
@@ -577,7 +613,7 @@ worked io =
     -- measuring the capture it was written for.
     testCase "a module can state a substitution's answer, and refl proves it" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (source ++ unlines
+      let (s1, r) = loadProofSource Strict s0 (source ++ unlines
             [ ""
             , "captured : Eq LC (LC.subst.x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y'\" base (var \"y\"))"
             , "captured = refl LC (abs \"y'\" base (var \"y\"))"
@@ -590,7 +626,7 @@ worked io =
                     `isInfixOf` unwords (renderResponse s1 r))
   , testCase "and a wrong answer is refused" $ do
       (s0, _) <- startingSession
-      let (_, r) = loadProofSource s0 (source ++ unlines
+      let (_, r) = loadProofSource Strict s0 (source ++ unlines
             [ ""
             , "captured : Eq LC (LC.subst.x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y\" base (var \"y\"))"
             , "captured = refl LC (abs \"y\" base (var \"y\"))"
@@ -623,18 +659,20 @@ crossing io =
           env <- io
           let roles = rolesOf env "LC"
               t = Tm "abs" [Name x, Other base, Sub e]
-              image w = maybe [w] (freeVars roles (rootName "x")) (lookup w sigma)
-              avoid = concatMap image (freeVars roles (rootName "x") t)
+              image w = maybe [w] (freeVars roles (named "x")) (lookup w sigma)
+              avoid = concatMap image (freeVars roles (named "x") t)
               want = until (`notElem` avoid) (++ "'") x
           -- Only the binder is read: the body is the crossing's business.
           pure $ case whnf env [] (call env "LC.subst-*" [toCore "LC" t, substMap env "LC" sigma]) of
-            Canonical (GlobalName ["LC"] "abs") _ (z : _) -> whnf env [] z === Primitive (LString want)
+            Canonical g _ (z : _)
+              | g == named "LC.abs" ->
+                  whnf env [] z === Primitive (LString want)
             other -> counterexample (show other) False
   , testProperty "LC: the free variables are the free variables" $
       withNumTests 300 $ forAll genLC $ \t -> ioProperty $ do
         env <- io
         pure $ fmap (sort . nub) (listOfStrings env (call env "LC.fv.x" [toCore "LC" t]))
-          === Just (sort (freeVars (rolesOf env "LC") (rootName "x") t))
+          === Just (sort (freeVars (rolesOf env "LC") (named "x") t))
   ]
   where
     -- **Bounded in size**, because reading a value back is whnf under every
@@ -649,7 +687,8 @@ crossing io =
               got = fromCore env (call env (lang ++ ".subst-*") [toCore lang t, substMap env lang sigma])
           pure $ counterexample (show got) $
             fmap (nameless roles []) got
-              === Just (namelessSubst roles (rootName cls) sigma (nameless roles [] t))
+              === Just (namelessSubst roles (named cls) sigma
+                                      (nameless roles [] t))
 
 -- ---------------------------------------------------------------------------
 
@@ -662,7 +701,7 @@ refused =
     -- point of the phase, and the install case below is the pair of this one.
   [ refusal "two variable productions at one class"
       ["language L, M where", "  v1 : x as occurrence -> x", "  v2 : x as occurrence -> $ x"]
-      "refused: in the grammar of L: L.v1, L.v2 all declare an occurrence at x, and a language has one variable production per class"
+      "refused: in the grammar of L: Refused.L.v1, Refused.L.v2 all declare an occurrence at Refused.x, and a language has one variable production per class"
     -- **A class a grammar reaches belongs to one of the languages it reaches**
     -- (MS8 phase 155): what a renamed name of the class becomes is that
     -- language's variable production, and the map substituting for it is a map
@@ -672,10 +711,10 @@ refused =
   , refusal "a class reached through two languages that both read it"
       [ "language K, A where", "  kvar : x as occurrence -> x", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  box -> ( box A )" ]
-      "refused: in the grammar of L: L and K both read an occurrence at x, and this grammar reaches both, so a substitution for x has no one language to replace a name with"
+      "refused: in the grammar of L: Refused.L and Refused.K both read an occurrence at Refused.x, and this grammar reaches both, so a substitution for Refused.x has no one language to replace a name with"
   , refusal "an occurrence beside something else"
       ["language L, M where", "  v : x as occurrence -> x ^ M"]
-      "refused: in the grammar of L, production L.v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
+      "refused: in the grammar of L, production Refused.L.v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
     -- **Narrowed at MS8 phase 154** (`~5k3mg`): a binder free in another
     -- language's argument is refused only where that language reaches no
     -- occurrence at the binder's class, as @K@ does not here — so there is
@@ -685,15 +724,21 @@ refused =
   , refusal "a binder free in a language that reaches no such class"
       [ "language K, A where", "  k -> k", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
-      "refused: in the grammar of L, production L.bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
+      "refused: in the grammar of L, production Refused.L.bind: a binder is free in A, which is of Refused.K, and nothing Refused.K reaches occurs at Refused.x, so there is nothing there to rename"
   , refusal "a generated name already declared"
       ["L.fv.x : String", "L.fv.x = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
-      "refused: L's substitution function L.fv.x is already declared"
+      -- **The GRAMMAR's check is the one that fires now** (MS12 phase 313):
+      -- what a clash is checked against is the name the family is actually
+      -- minted under ('Thena.Language.Grammar.substitutionFamily'), and with
+      -- the class's whole name it asked after @Refused.L.fv.Refused.x@, which
+      -- nothing declares — so the clash fell through to the plain declaration
+      -- path and was reported without saying what the name belongs to.
+      "refused: L's substitution function Refused.L.fv.x is already declared"
   ]
   where
     refusal what body want = testCase what $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines
+      let (s1, r) = loadProofSource Strict s0 (unlines
             (["module Refused where", "", "x : Token String", "x = /[a-z]+/", ""] ++ body))
       last (renderResponse s1 r) @?= want
 
@@ -710,7 +755,7 @@ followed :: [TestTree]
 followed =
   [ testCase "x[x -> N] is N, and y[x -> N] is y when y is not x, for names nobody knows" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (source ++ unlines lemmas) of
+      case loadProofSource Strict s0 (source ++ unlines lemmas) of
         (_, ProofLoaded {}) -> pure ()
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   ]

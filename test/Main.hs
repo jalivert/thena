@@ -44,6 +44,8 @@ import qualified Thena.DeclarationReadersTests
 import qualified Thena.SpecialiseTests
 import qualified Thena.DotPatternTests
 import qualified Thena.InteractiveSplitTests
+import qualified Thena.LevelSpliceTests
+import qualified Thena.SearchReadyTests
 import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
@@ -60,6 +62,8 @@ import qualified Thena.JudgmentTests
 import qualified Thena.ObjectTermTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
+import qualified Thena.PartialImportTests
+import qualified Thena.SuspendedImportTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
 import qualified Thena.NoCycleTests
@@ -122,6 +126,8 @@ main =
       , Thena.SpecialiseTests.tests
       , Thena.DotPatternTests.tests
       , Thena.InteractiveSplitTests.tests
+      , Thena.LevelSpliceTests.tests
+      , Thena.SearchReadyTests.tests
       , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests
@@ -138,6 +144,8 @@ main =
       , Thena.ObjectTermTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests
+      , Thena.PartialImportTests.tests
+      , Thena.SuspendedImportTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
       , Thena.NoCycleTests.tests

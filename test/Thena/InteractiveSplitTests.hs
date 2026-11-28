@@ -29,7 +29,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (rootName)
-import Thena.Driver (Session, command, machineOf)
+import Thena.Driver (Leniency (..), Session, command, machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Files (loadFile, startingSession)
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -38,6 +38,17 @@ import Thena.Render (rendering, renderCore, renderResponse)
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
 target = "examples/SplitAtAHole.thena.script"
+
+-- | __The arm re-binds the author's word for the scrutinee on purpose__, so
+-- every split through here warns that the outer binder went dead. That is the
+-- re-binding doing its job: a reader standing in the @vcons@ arm writes
+-- @xs@ and gets the refined vector, which costs the ambient @xs@ its word. The
+-- warning is deliberately NOT narrowed to a word the user wrote twice, so it is
+-- part of what a split prints and is asserted here.
+shadowedByTheArm :: String
+shadowedByTheArm =
+  "warning: xs shadows an outer binder of the same word, which no word reaches \
+  \now \8212 walk up to that binder and rename it to give it one"
 
 -- | One command, and what the session said back.
 step :: Session -> String -> (Session, [String])
@@ -59,7 +70,7 @@ atAHole s =
       \{ vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }"
     , "open Vec"
     , ":theorem vfirst : \8704 (A : Type\8320) (m : N) (xs : Vec A (s m)) -> A"
-    , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
+    , "attack", "intro", "intro", "intro"
     ]
 
 tests :: TestTree
@@ -68,14 +79,14 @@ tests =
     "a split taken at a hole"
     [ testCase "the script runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadFile s target
+        (_, _, stopped) <- loadFile Strict s target
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- The statement is the one `DependentIndex.thena.script` proves by
       -- hand, so the two paths are known to end in the same place.
     , testCase "and the inductive theorem is admitted at its written type" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
@@ -87,7 +98,7 @@ tests =
       -- would have the same type and would not reduce to `z`.
     , testCase "and the theorem by cases computes from the binder its case bound" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         let (_, out) = step s' ":whnf vhead N z (vcons N z z (vnil N))"
         out @?= ["z"]
 
@@ -103,6 +114,7 @@ tests =
           @?= [ "subgoals: vnilMethod, vconsMethod"
               , "no subgoals"
               , "subgoals: vconsCase"
+              , shadowedByTheArm
               ]
 
       -- The same split by the other word: `induction` hands each method a
@@ -116,5 +128,6 @@ tests =
           @?= [ "subgoals: vnilMethod, vconsMethod"
               , "no subgoals"
               , "subgoals: vconsCase"
+              , shadowedByTheArm
               ]
     ]

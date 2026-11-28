@@ -37,6 +37,11 @@ import Thena.Instral.Type (Signature (..), Ty (..), letterFor)
 data TypeView
   = AString              -- ^ @String@
   | AName                -- ^ @Name@, and it is not 'AString'
+  | AnIdent
+    -- ^ @Ident@ — a binder's identity: the word it displays and, when there is
+    -- one, the token it stands for (MS12 phase 353). **Not 'AName'**: a name is
+    -- how a rule reaches a binding that is already real, where this may carry
+    -- the token a binder was opened at before anything refers to it.
   | AnInt                -- ^ @Int@
   | AChar                -- ^ @Char@
   | ABool                -- ^ @Bool@
@@ -116,6 +121,7 @@ at :: Bool -> Ty -> TypeView
 at nested ty = case ty of
   TString      -> AString
   TName        -> AName
+  TIdent       -> AnIdent
   TInt         -> AnInt
   TChar        -> AChar
   TBool        -> ABool

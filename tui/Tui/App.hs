@@ -71,7 +71,7 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
 
-import Thena.Driver (Response (Quit), Session, oneLine)
+import Thena.Driver (Leniency (..), Response (Quit), Session, oneLine)
 import Thena.Files (following, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
@@ -1116,7 +1116,10 @@ selectableIxs rows = [i | (i, r) <- zip [0 :: Int ..] rows, isJust (rowInsert r)
 runEngineLine :: St -> String -> [String] -> EventM Name St ()
 runEngineLine st line extra = do
   let (s', resp) = oneLine (stSession st) line
-  case following s' resp of
+  -- **The editor is an interactive prompt, so its acts are lenient** (MS12
+  -- phase 315, @~mgqwb@): a module whose proofs are not all finished loads as
+  -- far as it can and says what did not go in.
+  case following Lenient s' resp of
     Just act | resp /= Quit -> do
       (sLoaded, responses, trouble) <- liftIO act
       let out =

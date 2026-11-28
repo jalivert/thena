@@ -436,10 +436,23 @@ failureTests =
       -- ScopeViolation and not a wait. Repairing it means moving a declaration
       -- leftwards, which is `raise`'s job and not the unifier's.
       failsWith [Hole "h" "Nat", Assumed "a" "Nat"] "h" "a" "Nat" "ScopeViolation"
-  , testCase "a solution naming a HOLE bound after it only waits" $
-      -- @k@ may yet be solved to something in scope, so the equation defers
-      -- rather than failing. This is the case the two must be told apart.
-      resultOf [Hole "h" "Nat", Hole "k" "Nat"] "h" "succ k" "Nat" `isDeferred` 1
+  , testCase "a solution naming a HOLE bound after it is repaired, not refused" $
+      -- **MS12 phase 320, `~ts63x`.** Where the thing bound too late is a hole
+      -- and nothing between the two binds anything, 'strengthen' claims a copy
+      -- of @k@ above @h@, solves @k@ with the copy and solves @h@ — so this is
+      -- two solutions and not a wait. It is what lets a derivation be written
+      -- inside another derivation once a judgment's rules take implicit
+      -- arguments; the item has the two equations that forced it.
+      resultOf [Hole "h" "Nat", Hole "k" "Nat"] "h" "succ k" "Nat" `isSolved` 2
+  , testCase "but with a BINDER between the two holes it still only waits" $
+      -- The repair declines to cross a λ or a ∀, because tying @k@ to a copy
+      -- bound above @a@ would put @a@ out of @k@'s reach for good — and @k@
+      -- may yet be solved with something that mentions it. **This is the case
+      -- the deferral is for**, and the three cases together are what the
+      -- unifier must tell apart: refuse a rigid variable, repair a hole,
+      -- wait when repairing would lose solutions.
+      resultOf [Hole "h" "Nat", Assumed "a" "Nat", Hole "k" "Nat"]
+        "h" "succ k" "Nat" `isDeferred` 1
   ]
   where
     failsWith ds a b ty needle = case resultOf ds a b ty of
@@ -484,7 +497,13 @@ wakeTests =
   [ testCase "a solution naming a later hole waits rather than failing" $
       -- @h@ is bound before @k@, so @h = succ k@ is not well-founded yet. It is
       -- not refused: @k@ may still be solved to something in scope.
-      let (_, cur, _) = run [Hole "h" "Nat", Hole "k" "Nat"] "h" "succ k" "Nat"
+      --
+      -- **The assumption between them is what makes this a wait** (MS12 phase
+      -- 320): with nothing in between, 'Thena.Core.Unify.strengthen' repairs
+      -- the equation instead of parking it, and the wake machinery below would
+      -- have nothing to act on.
+      let (_, cur, _) = run [Hole "h" "Nat", Assumed "a" "Nat", Hole "k" "Nat"]
+                            "h" "succ k" "Nat"
        in length (constraintsOf (rebuild cur)) @?= 1
   , testCase "a second run wakes the first run's constraint and clears it" $
       twoRuns @?= ([], ["define h", "define k"])
@@ -495,7 +514,7 @@ wakeTests =
   ]
   where
     twoRuns =
-      let dev = devOf [Hole "h" "Nat", Hole "k" "Nat"]
+      let dev = devOf [Hole "h" "Nat", Assumed "a" "Nat", Hole "k" "Nat"]
           (t1, n1) = readIn (devContext dev) (devNames dev) "h"
           (t2, n2) = readIn (devContext dev) n1 "succ k"
           (ty, n3) = readIn (devContext dev) n2 "Nat"

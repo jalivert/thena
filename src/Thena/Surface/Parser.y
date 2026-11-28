@@ -129,20 +129,20 @@ Module :: { SurfaceModule }
   -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
   -- steps are directories, exactly as @import@ reads them.
   : module QName where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) SelectWide (reverse $5) }
+      { SurfaceModule (fst $2) (snd $2) SelectWide (openingAt $4 (reverse $5)) }
   -- **And a header may state the file's interface** (MS11 phase 285), which is
   -- his ruling of 2026-10-30: the export list attaches to the header, one place
   -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
   -- is a module that exports nothing and has to be writable — the empty list is
   -- a statement, where a missing clause is the absence of one.
   | module QName exporting '(' ExportNames ')' where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) (SelectOnly (reverse $5)) (reverse $9) }
+      { SurfaceModule (fst $2) (snd $2) (SelectOnly (reverse $5)) (openingAt $8 (reverse $9)) }
   -- **Or say what it withholds instead** (MS11 phase 290), the other half of
   -- the same ruling. **One slot and not two clauses**: a file narrows by naming
   -- what it keeps or by naming what it withholds, which is the choice an @open@
   -- already makes between @( … )@ and @hiding ( … )@.
   | module QName hiding '(' ExportNames ')' where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) (SelectHiding (reverse $5)) (reverse $9) }
+      { SurfaceModule (fst $2) (snd $2) (SelectHiding (reverse $5)) (openingAt $8 (reverse $9)) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --
@@ -315,9 +315,23 @@ InstrElements :: { [RawOperand] }
   : InstrOperand                           { [$1] }
   | InstrElements ',' InstrOperand         { $3 : $1 }
 
-Decls :: { [SurfaceDecl] }
-  : Decl                                   { [$1] }
-  | Decls ';' Decl                         { $3 : $1 }
+-- | A block of declarations, **each with where it was written** (MS12 phase
+-- 334, @~hcr2d@).
+--
+-- **The separator carries the position and the declaration does not have to.**
+-- "Thena.Surface.Layout" inserts a @;@ at the position of the first token of
+-- every line it begins, so the @;@ in front of a declaration is that
+-- declaration's own first token — which is why this needs no position on
+-- 'Decl', no position on 'QName', and no change to any other production.
+-- 'Module' fills the first one in from the opening brace the same pass
+-- inserted, whose position is the first token of the block.
+--
+-- **A declaration typed at the prompt keeps 'Nothing'**: @parseSurfaceDecls@
+-- is a start symbol, so there is no block in front of the first declaration and
+-- there is no file for a position to point into.
+Decls :: { [(Maybe Pos, SurfaceDecl)] }
+  : Decl                                   { [(Nothing, $1)] }
+  | Decls ';' Decl                         { (Just (startsAt $2), $3) : $1 }
 
 -- | **Agda\/Haskell-style: a declaration is two of these.**
 -- 'Thena.Surface.Concrete.paired' puts a signature together with the equation
@@ -358,9 +372,9 @@ Decl :: { SurfaceDecl }
   -- @import … where@ production below, and the two are the same extension of
   -- the same shape.
   | consult QName where '{' Decls '}'
-      { SurfaceConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+      { SurfaceConsult Own (fst $2) (snd $2) (Just (openingAt $4 (reverse $5))) }
   | public consult QName where '{' Decls '}'
-      { SurfaceConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
+      { SurfaceConsult Public (fst $3) (snd $3) (Just (openingAt $5 (reverse $6))) }
   -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
   -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
   -- file states what it refers to and never relies on the session.
@@ -377,15 +391,15 @@ Decl :: { SurfaceDecl }
   -- carries its own extent, so what a @do@ or a @data@ block does to an
   -- @import@ written in it is nothing.
   | import QName ImportSel where '{' Decls '}'
-      { SurfaceImport Own (fst $2) (snd $2) $3 (Just (reverse $6)) }
+      { SurfaceImport Own (fst $2) (snd $2) $3 (Just (openingAt $5 (reverse $6))) }
   | public import QName ImportSel where '{' Decls '}'
-      { SurfaceImport Public (fst $3) (snd $3) $4 (Just (reverse $7)) }
+      { SurfaceImport Public (fst $3) (snd $3) $4 (Just (openingAt $6 (reverse $7))) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
   -- the same thing written in one line.
   | namespace QName where '{' Decls '}'
-      { SurfaceNamespace (fst $2) (snd $2) (reverse $5) }
+      { SurfaceNamespace (fst $2) (snd $2) (openingAt $4 (reverse $5)) }
   -- **A top-level block is an item, not an expression** — his, 2026-09-03.
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.
@@ -676,6 +690,37 @@ Names :: { [String] }
   | Names ident                            { $2 : $1 }
 
 {
+
+-- --------------------------------------------------------------------------
+-- Where a declaration was written (MS12 phase 334, @~hcr2d@)
+-- --------------------------------------------------------------------------
+
+-- | The position a separator token stands at.
+--
+-- **For a module written with layout that is the first token of the line the
+-- separator opens**, because "Thena.Surface.Layout" builds the separators it
+-- inserts out of its @Line@ and @Open@ markers, each of which carries the
+-- position of the token that follows it. For a module written with explicit
+-- braces it is the author's own brace or semicolon.
+startsAt :: Located Token -> Pos
+startsAt (Located p _) = p
+
+-- | Give the first declaration of a block the position of the brace that opened
+-- it.
+--
+-- The grammar reads every /other/ position off the @;@ in front of the
+-- declaration; the first declaration has no @;@ in front of it and the opening
+-- brace is what stands there instead.
+--
+-- **Every block that holds declarations goes through this now** (MS12 phase
+-- 336, @~6g27s@), and not only a module's: his ruling of 2026-11-22 made the
+-- loader walk into a @namespace@, @import … where@ or @consult … where@ block,
+-- so a declaration inside one is a destination and wants its own line. The
+-- @written@ function that threw these positions away is gone.
+openingAt :: Located Token -> [(Maybe Pos, SurfaceDecl)] -> [(Maybe Pos, SurfaceDecl)]
+openingAt t ds = case ds of
+  (Nothing, d) : rest -> (Just (startsAt t), d) : rest
+  _                   -> ds
 
 -- | Structured, per §12 invariant 2.
 --

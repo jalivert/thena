@@ -56,6 +56,7 @@ module Thena.Errors
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
   , SyntaxError (..)
+  , syntaxErrorAt
   , ResolveError (..)
   , DevForm (..)
   ) where
@@ -64,13 +65,13 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Instral.Pattern (Pattern)
-import Thena.Syntax.Lexer (BlockKind, LexError)
+import Thena.Syntax.Lexer (BlockKind, LexError (..), Pos)
 import Thena.Language.Earley (ParseFailure)
 import Thena.Language.Reader (ReadError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
-import Thena.Syntax.Parser (ParseError)
+import Thena.Syntax.Parser (ParseError (..))
 
 -- | Something worth telling the user about a load that nonetheless succeeded
 -- (MS6 phase 98).
@@ -133,6 +134,27 @@ data Warning
     -- repair is cheap, since renaming the theorem before @qed@ costs nothing
     -- and renaming it after costs the proof. @qed@ is silent for that reason:
     -- the forecast was given when the proof opened.
+  | BinderShadows String
+    -- ^ **a word a binder just took, which an outer binder of the same chain
+    -- carried** (MS12 phase 330). His ruling of 2026-11-20, /THERE IS ONE
+    -- NAME/, part three, and the second principle's answer once more:
+    -- shadowing is allowed, the outer binder goes dead, and the UI says so.
+    --
+    -- **This is the shape with nothing below referring to the dead binder**, so
+    -- the only thing lost is the word: the binder is still there, still printed,
+    -- and @rename@ gives it a word again.
+  | BinderShadowsReferenced String [String]
+    -- ^ the same word, and **the components below it whose own terms still
+    -- refer to the binder it killed** (MS12 phase 330) — his second shape,
+    -- /naming those references/, because a reference the user cannot see from
+    -- where they are standing is the part that costs them something: it prints
+    -- marked from now on, and the printed term no longer re-parses to itself.
+    --
+    -- **The names are an aid and their absence decides nothing.** A reference
+    -- standing in a chain's trailing term has no component to name, so this
+    -- constructor is chosen by whether anything below refers to the dead binder
+    -- and never by the list being non-empty —
+    -- 'Thena.Development.Partial.wordsTaken' says which.
   | PublicConsultIdle String
     -- ^ **a rule file's @public consult ‹base›@, and the base it names** (MS11
     -- phase 298, his ruling of 2026-11-06, @~ckp39@). A plain @consult@ in a
@@ -284,6 +306,28 @@ data FailReason
   | ExpectedName
     -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
     -- literal that reads as one at the root.
+  | ExpectedIdent
+    -- ^ an operand was not a binder's identity (MS12 phase 353) — neither a
+    -- @VIdent@ nor the string literal that reads as one with no token.
+    --
+    -- **Unreachable from a loaded base**, which types every operand: a @VName@
+    -- variable at this position is a type error, and @name-ident@ is how a rule
+    -- that holds a name says it means that name's binder. It is here because
+    -- the prompt's own path and a test can reach it, exactly as 'ExpectedName'
+    -- can.
+  | WordBindsNothing String
+    -- ^ @ident-term x@ where @x@ is a word and nothing more (MS12) — it names
+    -- no variable, so there is no term to answer with. Carries the word.
+    --
+    -- **Reachable from a typed base**, unlike 'ExpectedIdent': an identifier
+    -- carries its token optionally, so this is a run-time condition and not a
+    -- type error. A @\"…\"@ literal at that position is the plain case, and so
+    -- is an identifier that came through @name-ident@.
+    --
+    -- **It does not mint.** @intro@ reads the same absence as /mint a token/,
+    -- which is right where a binder is being opened and wrong here: a minted
+    -- variable would be one nothing had bound, so the term would mention a
+    -- binder that is not there.
   | NoSuchNamespace String
     -- ^ @open X@ where nothing at all is named @X.…@ (MS10 phase 247).
     --
@@ -380,6 +424,13 @@ data FailReason
   | NothingToIntroduce
     -- ^ @intro@ on the right shape, but the hole's type is neither a Π nor a
     -- @let@ once whnf'd
+  | NotABinderHere
+    -- ^ @rename@ where the focus is not a component (MS12 phase 330). A word
+    -- belongs to a binder, so the position has to be one: a constraint binds
+    -- nothing a word reaches, and a position inside a core term is not where
+    -- that term's binders are named. **Walking up to the binder is the whole of
+    -- the operation** — his ruling of 2026-11-20, /THERE IS ONE NAME/, part
+    -- four — so a focus that is not one is the ordinary way to meet this
   | NotYetPure Position
     -- ^ @Certify@ on a development that still has a hole, a guess or an
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
@@ -389,7 +440,7 @@ data FailReason
     -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
     -- development claims nothing, so it has no goal to read
   | NoRuleMatched
-    -- ^ @prove@ found no rule whose head passes at the focus (§7.3). It says
+    -- ^ @step@ found no rule whose head passes at the focus (§7.3). It says
     -- only that, and no more: the focus is what it is about, and 'Stuck'
     -- carries the whole machine, so @:where@ still says where (§7.5).
     --
@@ -567,6 +618,10 @@ data MoveError
     -- scope" has already been answered by resolution before this is reached
   | NoSuchPart
     -- ^ a descent naming a field the focused form does not have
+  | NoGoalLeft
+    -- ^ @next@ with nothing left to prove: the development holds no goal, so
+    -- there is nowhere to go. Distinct from 'NoSuchHole', which is a name that
+    -- reaches nothing — this one is the development being finished
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------
@@ -933,6 +988,35 @@ data SyntaxError
     -- elaboration fails through the machine.
   | ResolveFailed ResolveError
   deriving (Eq, Show)
+
+-- | __Where in the text a syntax error is__, where it is anywhere (MS12 phase
+-- 349, @~8w6qw@).
+--
+-- **The position was always carried and never read.** Every one of the four
+-- failures a reader produces holds the position of the token it stopped at —
+-- the prompt prints it, @syntax.thena.rules: 4:21: unexpected (@ — and
+-- 'Thena.View.Failure' matched the constructors and discarded their payloads,
+-- so a pane drawing a refused rule file could say /could not be read/ and not
+-- where. This is the one function that answers it, so the two readings cannot
+-- drift.
+--
+-- **'Nothing' is a failure at the end of the input**, which is the one place
+-- there is no token to point at, and the three shapes whose own payload is a
+-- structure with its own idea of a line ('BlockIllFormed' counts
+-- instructions, 'BlockUnreadable' counts lines inside a block).
+syntaxErrorAt :: SyntaxError -> Maybe Pos
+syntaxErrorAt e = case e of
+  LexFailed (LexError p _)                        -> Just p
+  ParseFailed (UnexpectedToken p _)               -> Just p
+  ParseFailed UnexpectedEndOfInput                -> Nothing
+  LayoutFailed (UnmatchedClose p)                 -> Just p
+  LayoutFailed (MissingClose p)                   -> Just p
+  SurfaceParseFailed (SurfaceUnexpectedToken p _) -> Just p
+  SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> Nothing
+  DeclarationsUnpaired {}                         -> Nothing
+  BlockUnreadable {}                              -> Nothing
+  BlockIllFormed {}                               -> Nothing
+  ResolveFailed {}                                -> Nothing
 
 -- | Why a named tree could not be turned into 'Core' (§2.5, §3.5).
 --

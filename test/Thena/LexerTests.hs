@@ -8,19 +8,23 @@
 module Thena.LexerTests (tests) where
 
 import Data.Char (isAsciiLower)
-import Data.List (sort)
+import Data.List (isSuffixOf, sort, stripPrefix)
+import System.Directory (doesDirectoryExist, listDirectory)
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Context (writableAmong)
+import Thena.Core.Term (Ident (..))
 import Thena.Render (describe)
-import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (Located (..), Token (..), isIdentifier, lexTokens)
 
 tests :: TestTree
 tests =
   testGroup
     "Thena.Syntax.Lexer — tagged regions"
     [ reservedWords
+    , mintedWords
     , testGroup
         "the extent of a region"
         [ lexes "a plain region" "s`f x`" [TTagOpen "s", TRaw "f x", TTagClose]
@@ -144,11 +148,16 @@ tests =
         -- property of a region and is tested above, of a region**, which is the
         -- whole argument for deleting the spelling.
         "the characters the two deleted notations used"
-        [ -- **A corner is still reserved**, so it is no token and no name
-          -- character either: a user who writes one is told at the lexer.
-          -- 'Thena.Driver.resolving' relies on that, naming its hoisted
-          -- bindings @⌜1⌝@ where nothing a user writes can reach.
-          fails "a corner is reserved and spells nothing" "\8988 x \8989"
+        [ -- **A corner is an ordinary character again** (MS12 phase 335,
+          -- `~6rfwp`, his ruling of 2026-11-21). It stayed reserved one phase
+          -- longer than the notation it spelled, because
+          -- 'Thena.Driver.resolving' named its hoisted bindings @⌜1⌝@ and leant
+          -- on no identifier being able to hold a corner. That binding is @'1@
+          -- now and leans on the start class instead — pinned just below, at
+          -- @the hoisted binding is not a word@ — so the corners went back the
+          -- way the angle brackets did.
+          lexes "a corner is a name character now" "\8988x\8989"
+            [TIdent "\8988x\8989"]
           -- **An angle bracket is an ordinary character again.** It was
           -- reserved for the alias alone, and reserving one narrows every name
           -- in every language, so it went back when the alias did.
@@ -181,6 +190,14 @@ tests =
           lexes "a literal and a name after it" "'a' b" [TChar 'a', TIdent "b"]
         , fails "an empty literal" "''"
         , fails "one that is never closed" "'a"
+        , -- **WHAT 'Thena.Driver.resolving' STANDS ON SINCE MS12 PHASE 335**
+          -- (`~6rfwp`): it hoists a written core term into a binding it names
+          -- @'1@, and that name must be one no rule body can write. A quote is
+          -- an @$idchar@ and not an @$idstart@, so @'1@ begins no word; the
+          -- only rule a leading quote can start is the character literal, and
+          -- @'1@ does not close one. Until this phase the binding was @⌜1⌝@ and
+          -- the guarantee was a reserved character instead.
+          fails "the hoisted binding is not a word" "'1"
         ]
     , testGroup
         -- Reserved characters with no token rule until MS5 phase 65: they
@@ -311,6 +328,91 @@ reservedWords =
         inLexer <- keywordsInLexer <$> readFile "src/Thena/Syntax/Lexer.x"
         [ w | w <- inLexer, Right [Located _ (TIdent _)] <- [lexTokens w] ] @?= []
     ]
+
+-- --------------------------------------------------------------------------
+-- The words the SYSTEM writes, against the same authority
+-- --------------------------------------------------------------------------
+
+-- | __Nothing stopped the system minting a word it cannot read back__ (MS12,
+-- @~vndxj@).
+--
+-- 'Thena.Core.Context.writableAmong' renamed a word something else had taken
+-- and said nothing about a word the language had taken, so reserving a word
+-- could silently make a printed term unreadable. **It had happened twice and a
+-- human caught it both times**: @at@, minted for a transport's carried value
+-- and reserved at phase 358, and a rule variable called @of@ when MS9 phase
+-- 179 reserved @of@ — that one shipped, and @.claude\/HAZARDS.md@ records it.
+--
+-- __Two tests because there are two ways a word gets out.__ The first is the
+-- mint point, where the renaming now happens. The second is a literal used as
+-- a binder's word directly, which the generated eliminators do — so it reads
+-- every source file and asks the lexer of every word written as an @Ident@
+-- literal there. That is the one that goes red the day a word on it is
+-- reserved, and it is the standing lesson again: the check is different code
+-- from the code it checks.
+--
+-- __A word BUILT rather than written escapes the second test, and there are
+-- three shapes of built word__ — measured 2026-11-27,
+-- @grep -rn 'Ident (' src\/@. None of them can be a keyword, and the reason is
+-- different each time: the numbering rule in
+-- 'Thena.Core.Term.freshIdentWhere' ends in a numeral and no keyword does; the
+-- priming in @Thena.Global.Generate.freshen@ ends in @\'@, which is a name
+-- character and no keyword holds; and a word taken from a declared name, with
+-- or without a @Case@ or @Method@ suffix, was written by a user through the
+-- lexer, which refuses a keyword there. **So the day one of those reasons
+-- stops holding, nothing here will say so** — it is the residue of @~vndxj@
+-- and it is written down rather than guarded.
+mintedWords :: TestTree
+mintedWords =
+  testGroup
+    "the words the system mints"
+    [ testCase "a keyword minted as a binder is numbered until it is a name" $ do
+        writableAmong [] (Ident "at")  @?= Ident "at1"
+        writableAmong [] (Ident "let") @?= Ident "let1"
+
+      -- And the rest of the function is as it was: an ordinary word is taken
+      -- as given, and numbered only when something else holds it.
+    , testCase "an ordinary word is untouched, and a clash still numbers" $ do
+        writableAmong [] (Ident "carried") @?= Ident "carried"
+        writableAmong [Ident "carried"] (Ident "carried") @?= Ident "carried1"
+
+    , testCase "every word written as an Ident literal in the source is a name" $ do
+        ws <- identLiteralsInSource
+        [ (f, n, w) | (f, n, w) <- ws, not (isIdentifier w) ] @?= []
+    ]
+
+-- | Every word spelled @Ident "…"@ on a line of @src\/@ that is not a comment,
+-- with where it is written.
+identLiteralsInSource :: IO [(FilePath, Int, String)]
+identLiteralsInSource = do
+  fs <- sourceFiles "src"
+  concat <$> traverse one fs
+  where
+    one f = do
+      src <- readFile f
+      pure
+        [ (f, n, w)
+        | (n, l) <- zip [1 :: Int ..] (lines src)
+        , take 2 (dropWhile (`elem` " \t") l) /= "--"
+        , w <- minted l
+        ]
+
+    minted [] = []
+    minted s'@(_ : rest) = case stripPrefix "Ident \"" s' of
+      Just t  -> let (w, more) = span (/= '"') t in w : minted (drop 1 more)
+      Nothing -> minted rest
+
+-- | Every file the library is built from, the generated grammars included.
+sourceFiles :: FilePath -> IO [FilePath]
+sourceFiles dir = do
+  es <- listDirectory dir
+  concat <$> traverse step [ dir ++ "/" ++ e | e <- es ]
+  where
+    step p = do
+      isDir <- doesDirectoryExist p
+      if isDir
+        then sourceFiles p
+        else pure [ p | any (`isSuffixOf` p) [".hs", ".hs-boot", ".x", ".y"] ]
 
 -- | Every @  "word"  { keyword … }@ rule whose word is alphabetic.
 keywordsInLexer :: String -> [String]

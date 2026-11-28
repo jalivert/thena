@@ -1,0 +1,19 @@
+module test.modules.PartlyWorse where
+
+import test.modules.Bit
+
+data Flag : Type₀ where
+  up : Flag
+  down : Flag
+
+first : Flag.Flag
+first = Flag.up
+
+broken : Flag.Flag
+broken = nonesuch
+
+alsoBroken : Flag.Flag
+alsoBroken = neitherThis
+
+after : Flag.Flag
+after = Flag.down

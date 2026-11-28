@@ -1,0 +1,45 @@
+-- A PROOF THIS FILE LEAVES FOR THE SESSION, AND THE IMPORT THAT STOPS FOR IT.
+--
+-- Import this with the pausing base consulted and elaboration runs by itself,
+-- reaches the hole below and hands you the unfinished proof to finish:
+--
+--   cabal run thena
+--   :consult examples/demo/Demo08Pausing.thena.rules
+--   import examples.demo.pending.Demo07Holes
+--     a placeholder: fill it and `yield` to carry on
+--       elaborating examples.demo.pending.Demo07Holes — yield to carry on, ...
+--   :where   -->  focus  let ? goal : value`0 value`
+--                 path   root ▸ zeroIsValue
+--   try-core core`V-num zero NV-zero`
+--   solve
+--   yield
+--     module examples.demo.pending.Demo07Holes
+--       declared zeroIsValue
+--
+-- Nothing of the module is declared until it finishes, so giving up with
+-- `:abandon` leaves the session exactly as it was — and takes anything you
+-- declared at the prompt in the meantime with it.
+--
+-- WITHOUT THE PAUSING BASE CONSULTED the file gets the plain refusal instead,
+-- because the shipped base's two clauses for a hole have empty bodies and the
+-- declaration is then finished with the hole still open:
+--
+--   stuck: not finished: the hole goal is still open, so there is no term yet
+--
+-- It is still under `pending/` because the demo's running order and the corpus
+-- suite were written while it did not work; the suite's demo case does not
+-- drive a yield.
+
+module examples.demo.pending.Demo07Holes where
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+
+open Tm
+open nvalue
+open value
+
+-- The statement is the half worth keeping in a file. The proof is left for the
+-- session: `V-num` needs a numeric value, and `0` is one.
+zeroIsValue : value`0 value`
+zeroIsValue = _

@@ -113,6 +113,33 @@ data Ty
     -- every clause a string comparison and the group a spelling. The idiom is
     -- the one 'TPattern' set: three head tests over a three-case type, which
     -- the category is free to grow past.
+  | TIdent
+    -- ^ **a binder's identity — the word it displays and, when there is one,
+    -- the token it stands for** (MS12 phase 353).
+    --
+    -- **It is NOT 'TName', and the token is the whole of the difference.** A
+    -- 'TName' is a namespace path and a word, which is how a rule reaches a
+    -- context entry that is already real: it writes the word and @resolve-name@
+    -- looks it up. A value of this type may instead carry the @Var@ a binder was
+    -- opened at before anything in the development refers to it — which is what
+    -- a @core\`∀ (${x} : ${T}) -> ${E}\`@ pattern binds, and what @intro@ must
+    -- /adopt/ rather than mint a second of. @Eq@ on 'Thena.Core.Term.Core'
+    -- compares tokens and ignores names, so two tokens both displayed @A@ are
+    -- not interchangeable and nothing printed tells them apart.
+    --
+    -- **HIS RULING, 2026-11-25** — @.claude\/RULINGS.md@, /one @intro@, and a
+    -- written literal may stand at an identifier/: there is one rule named
+    -- @intro@ and its one-argument form takes this type. **No token means mint
+    -- one**, which is what a bare @intro@ does and what @intro "A"@ keeps
+    -- meaning; a token means adopt it. @intro@ never looks one up.
+    --
+    -- **A written @"…"@ literal stands here**, which is the third member his
+    -- ruling gave the literal set — 'Thena.Instral.Infer.settleText' and
+    -- 'Thena.Engine.operandIdentifier' are the two places, and it reads as a
+    -- word with no token. **A /variable/ of 'TName' does not**, exactly as a
+    -- variable of 'TString' does not stand at a 'TName' (his ruling of
+    -- 2026-09-12): the conversion is written down, with
+    -- 'Thena.Instral.Ops.NameIdent'.
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
@@ -218,6 +245,7 @@ renderTy = go False
     go p ty = case ty of
       TString      -> "String"
       TName        -> "Name"
+      TIdent       -> "Ident"
       TInt         -> "Int"
       TChar        -> "Char"
       TBool        -> "Bool"
