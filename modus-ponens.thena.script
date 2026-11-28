@@ -1,0 +1,12 @@
+:theorem mod-pon : ∀ (A : Type) (B : Type) (C : Type) -> A -> (A -> B) -> (B -> C) -> C
+step 7
+goto mod-pon1
+step
+goto a
+step
+goto a1
+step
+step
+goto mod-pon
+step
+qed

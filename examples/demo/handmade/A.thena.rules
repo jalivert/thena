@@ -1,0 +1,14 @@
+rule base A where
+
+
+greet-me : ()
+rule greet-me :- do  name = ask "What's your name?" text
+                     options name
+
+
+
+options : String -> ()
+rule options name :- do greetings = concat "Greetings " name
+                        say greetings
+rule options name :- do greetings = concat "Hello " name
+                        say greetings

@@ -1,0 +1,11 @@
+:theorem proj₁ : ∀ (T : Type) -> T -> T -> T
+attack
+intro
+intro
+intro
+goto proj₁1
+fill core`_`
+solve
+goto proj₁
+solve
+qed

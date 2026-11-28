@@ -1,0 +1,4 @@
+import examples.demo.handmade.Lambda
+:abandon
+:infer valueNoStep-s
+:session

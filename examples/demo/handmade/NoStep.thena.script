@@ -1,0 +1,81 @@
+-- VALUES DON'T STEP — proved from the prompt, inside the import that asked for it.
+--
+-- Step through this a line at a time. `:where`, `:show` and `:matches` between
+-- the steps are the demo. Verified end to end 2026-11-15: the import completes,
+-- `valueNoStepAuto` is declared, and `:trust` says `resting on nothing`.
+--
+-- WHAT IS REAL AND WHAT IS NOT, so the claim made out loud is the true one.
+-- REAL: the `case s of { }` step. Nothing in `noStep` names `E-beta`, `E-app1`
+-- or `E-app2`; elaboration picks the split's arms and discharges each by
+-- no-confusion on its own. Also real: the import parks, hands you the prompt
+-- mid-elaboration, and takes the proof you built there.
+-- NOT REAL: the navigation. `V-absCase1`, `V-absCase`, `V-absMethod` and
+-- `goal1` are addresses written into the rule, and `s` is named in a fenced
+-- fragment. A version whose moves are several clauses of one rule does search
+-- and does reach ∎ — and cannot be reached through a `yield`, which is
+-- `~7grfx` in .jalivert/REPORT.md.
+
+-- ---------------------------------------------------------------------------
+-- The surface program says: I am not proving this at the prompt of a file.
+--
+--   valueNoStepAuto = \ m u v s -> do {
+--     yield "do induction-on v at the prompt" ;
+--   }
+--
+-- So the import stops in the middle and hands you the wheel.
+
+import examples.demo.handmade.Lambda
+:where
+
+-- The goal is `Empty`, with a value derivation `v` and a step derivation `s`
+-- in scope. This is the interesting goal and nothing else had to be typed to
+-- reach it.
+
+-- ---------------------------------------------------------------------------
+-- FIRST BEAT: ask the general search what it has. `:matches` is what the engine
+-- would try here — 58 rows, and the nullary ones a bare `step` can reach are
+-- try-in-scope / fit-in-scope / attack / abandon / step.
+--
+-- `step` IS NOT PART OF THIS BEAT ANY MORE, AND IT IS NOT A STEP YOU CAN TAKE
+-- AND UNDO. Measured 2026-11-24, after the in-scope rules (engine phases 339,
+-- 340) shipped: `fit-in-scope` here fits the declaration that is ITSELF being
+-- elaborated, so the goal becomes `refined = valueNoStepAuto m1 u1 v1 s1` with
+-- four fresh holes — the theorem appealing to itself. `regret` answers *no
+-- clause of regret applies here*, because the choice point is the rule's and
+-- not the line's, and `:undo` rewinds the whole `import`. So there is no way
+-- back to this goal inside the run. `~qs3dj` in .jalivert/REPORT.md is the
+-- engine-side entry; until it is answered, show `:matches` and go on.
+
+:matches
+
+-- ---------------------------------------------------------------------------
+-- SECOND BEAT: the specialised base is already in scope — `Lambda.thena`
+-- consults it at the top, which is the design claim: you write a rule base for
+-- your own problem and the file says so.
+
+:bases
+
+-- ---------------------------------------------------------------------------
+-- THIRD BEAT: say the one thing you are willing to say, and the base does the
+-- rest. One command, and the proof is complete and committed.
+
+induction-on "v"
+
+-- What it prints, and what each line is:
+--
+--   subgoals: V-absMethod                                  induction on v
+--   subgoals: V-absCase                                     one case: V-abs
+--   subgoals: E-betaMethod, E-app1Method, E-app2Method       case s of { }
+--   no subgoals                                              E-beta refuted
+--   no subgoals                                              E-app1 refuted
+--   no subgoals                                              E-app2 refuted
+
+:show
+
+-- ---------------------------------------------------------------------------
+-- FOURTH BEAT: hand control back, and the import carries on to the end with
+-- the proof you just built in it.
+
+yield
+:show valueNoStepAuto
+:trust

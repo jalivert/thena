@@ -1,0 +1,114 @@
+module examples.demo.handmade.Lambda where
+
+
+
+
+-- consult examples.demo.handmade.NoStep
+
+
+
+
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+
+
+
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder -> ( λ x . E[x] )
+  app -> ( M N )
+
+open LC
+
+
+
+
+
+
+judgment value = M value where
+
+  V-abs:  ------------------------
+          ( λ x . E ) value
+
+open value
+
+
+
+
+
+
+judgment step = M --> N where
+
+  E-beta:  N value
+           -------------------------------------
+           ( ( λ x . E ) N ) --> E[x->N]
+
+  E-app1:  M --> M'
+           ------------------------
+           ( M N ) --> ( M' N )
+
+  E-app2:  v : M value    s : N --> N'
+           ----------------------------
+           ( M N ) --> ( M N' )
+
+open step
+
+
+
+
+
+
+term : LC
+term = LC`(λ x . x)`
+
+
+
+
+-- st : ∀ (m : LC) (n : LC) (vp : value`${n} value`) (x : String) -> step`((λ ${x} . ${m}) ${n}) --> ${m}[${x}->${n}]`
+st : ∀ (m : LC) (n : LC) (vp : value n) (x : String) -> step LC`((λ ${x} . ${m}) ${n})` LC`${m}[${x}->${n}]`
+st = \ m n vp x -> E-beta n x m vp
+
+
+
+
+-- This is what happens when there is a mistake in a module that we import.
+-- (Kept commented so the file loads: `refl LC m` proves `Eq LC m m`, never
+-- `Eq LC m n`. Uncomment to show the refusal.)
+-- simple-id : ∀ (m : LC) (n : LC) -> Eq LC m n
+-- simple-id = \ m n -> refl LC m
+
+
+
+
+
+
+-- VALUES DON'T STEP.
+--
+valueNoStep-s : forall (m : LC) (u : LC) (v : value`${m} value`) (s : step`${m} --> ${u}`) -> Empty
+valueNoStep-s = \ m u v s -> induction v of
+                                V-abs x e -> case s of { }
+
+
+
+
+-- THE SAME THEOREM, FOUND BY SEARCH — AND IT RUNS AT THE PROMPT, NOT HERE.
+-- `examples/demo/handmade/NoStep.thena.script` is the demo: step through it,
+-- and `induction-on "v"` searches for the proof and `qed` admits it.
+--
+-- WHY IT IS COMMENTED OUT HERE. `noStep`'s `strategy` has two clauses, so the
+-- call to it backtracks once — it tries no-confusion without inducting, finds
+-- that E-beta's case survives, and takes the other clause. A rule that
+-- backtracks works at the prompt and does NOT work inside a do-block: the
+-- enclosing λ-elaboration fails with
+--
+--   stuck: nothing was returned to bind to body
+--
+-- even though the proof itself was completed. That is `~7grfx` in
+-- .jalivert/REPORT.md, with both reproductions. Until it is fixed, a do-block
+-- can call a rule that replays a proof but not one that searches for one —
+-- which is why this is a comment and the script is the demo.
+valueNoStepAuto : forall (m : LC) (u : LC) (v : value`${m} value`) (s : step`${m} --> ${u}`) -> Empty
+valueNoStepAuto = \ m u v s -> do {
+  yield "do induction-on v at the prompt" ;
+}

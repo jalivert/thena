@@ -1,0 +1,32 @@
+rule base noStep where
+
+-- THE ONE COMMAND. `induction-on "v"` at the prompt, standing in the yield the
+-- surface program left, proves `valueNoStepAuto` completely and commits it, so
+-- the following `yield` carries the import on to the end.
+--
+-- BE HONEST ABOUT WHAT THIS IS. The navigation below is written in, not found:
+-- `V-absCase1`, `V-absCase`, `V-absMethod` and `goal1` are addresses known
+-- before the rule runs, and `s` is named in a fenced fragment. **It is a
+-- transcript with one real search inside it**, and the real one is the
+-- `case s of { }`: nothing here names `E-beta`, `E-app1` or `E-app2`, and
+-- elaboration selects the split's arms and discharges each by no-confusion on
+-- its own. That part is genuinely found.
+--
+-- A VERSION WHOSE MOVES ARE SEVERAL CLAUSES OF ONE RULE DOES SEARCH AND DOES
+-- REACH ∎ — and it cannot be reached from a do-block or through a `yield`,
+-- because a rule that backtracks fails on return. That is `~7grfx` in
+-- .jalivert/REPORT.md, and it is why this rule is deliberately deterministic:
+-- **nothing in it is a multi-clause call, so no choice point is ever built.**
+induction-on : Name -> ()
+rule induction-on n :- when focus-is-hole
+  do t = resolve-name n
+     ; induction-core t
+     ; goto-named "V-absCase1"
+     ; elaborate surface`case s of { }`
+     ; goto-named "V-absCase"
+     ; solve
+     ; goto-named "V-absMethod"
+     ; solve
+     ; goto-named "goal1"
+     ; solve
+

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+cd ~/Projects/PL\&TT/Project\ Thena/editor
+
+cabal run thena-tui --flags=tui
