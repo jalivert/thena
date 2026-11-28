@@ -1,10 +1,10 @@
 rule base search where
 
 proof-search : ()
-rule proof-search :- when focus-is-hole
+rule proof-search at ? _ : _ :-
   do step
      call proof-search
 
-rule proof-search :- when focus-is-guess
+rule proof-search at ? _ ≐ _ : _ :-
   do step
      call proof-search
