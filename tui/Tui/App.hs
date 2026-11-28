@@ -2686,6 +2686,7 @@ draw st =
     drawType tv = case tv of
       AString          -> "String"
       AName            -> "Name"
+      AnIdent          -> "Ident"
       AnInt            -> "Int"
       AChar            -> "Char"
       ABool            -> "Bool"

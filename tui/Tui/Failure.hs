@@ -294,6 +294,12 @@ kindWords k = case k of
   NameReserved -> Words "that name is reserved" "a reserved name: " [TheWord, TheName]
   NotAName -> Words "that cannot be a name" "cannot be a name: " [TheText, TheWord]
   UnknownName -> Words "the checker does not know that name" "the checker does not know " [TheName, TheDatatype]
+  -- **Not "not in scope", and the difference is not a nicety** (MS12 phase
+  -- 360). Nothing was looked up: an identifier's token is its identity, so a
+  -- word carrying none names no variable anywhere, and /not in scope/ would
+  -- send the author hunting for a binding that no other spelling would have
+  -- found either. 'Thena.Render' says it as @is a word and nothing more@.
+  WordBindsNothing -> Words "that word names no variable" "a word and nothing more: " [TheWord]
   -- Kinds and counts
   WrongKindOfThing -> Words "something else was wanted" "expected " [TheWanted]
   WrongCount -> plain "the wrong number of them"
@@ -423,6 +429,11 @@ roleLabel r = case r of
   TheField -> "the field"
   TheIndex -> "the index"
   TheParameter -> "the parameter"
+  -- **"the focus" and not "the parameter"** (MS12 phase 358): the focus is the
+  -- other half of a rule head, so /the parameter  2/ would point at the side of
+  -- the line without the mistake in it. The count is a position of the clause's
+  -- @at@ pattern, from 1 — the binder, then the component's sub-terms.
+  TheFocus -> "the focus"
   TheMethod -> "the method"
   TheMotive -> "the motive"
   TheConstructor -> "the constructor"
